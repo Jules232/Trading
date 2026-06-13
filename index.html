@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trading Simulator</title>
+    
+    <!-- Tailwind CSS pour le style -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Babel pour lire le code React (JSX) directement dans le navigateur -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- Import Map pour charger React, Firebase et les icônes depuis esm.sh -->
+    <script type="importmap">
+    {
+        "imports": {
+            "react": "https://esm.sh/react@18.2.0",
+            "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+            "firebase/app": "https://esm.sh/firebase@10.8.0/app",
+            "firebase/auth": "https://esm.sh/firebase@10.8.0/auth",
+            "firebase/firestore": "https://esm.sh/firebase@10.8.0/firestore",
+            "lucide-react": "https://esm.sh/lucide-react@0.330.0"
+        }
+    }
+    </script>
+</head>
+<body class="bg-[#09090b] text-zinc-100 min-h-screen">
+    
+    <!-- Conteneur principal où le site va s'afficher -->
+    <div id="root"></div>
+
+    <!-- NOTRE CODE (Exactement le même que précédemment) -->
+    <script type="text/babel" data-type="module">
+    import React, { useState, useEffect, useRef, useMemo } from 'react';
+    import { createRoot } from 'react-dom/client';
+    import { initializeApp } from 'firebase/app';
+    import { 
+      getAuth, 
+      signInAnonymously, 
+      signInWithCustomToken, 
+      onAuthStateChanged 
+    } from 'firebase/auth';
+    import { 
+      getFirestore, 
+      doc, 
+      setDoc, 
+      getDoc, 
+      onSnapshot,
+      collection
+    } from 'firebase/firestore';
+    import { 
+      TrendingUp, 
+      TrendingDown, 
+      Activity, 
+      AlertCircle, 
+      DollarSign, 
+      Briefcase,
+      Zap,
+      Globe
+    } from 'lucide-react';
+
+    // --- INITIALISATION FIREBASE ---
+    const firebaseConfig = {
+      apiKey: "AIzaSyDct8USnQM78QdVHxmg4P94fejPacfc6RA",
+      authDomain: "aurabienveillance.firebaseapp.com",
+      projectId: "aurabienveillance",
+      storageBucket: "aurabienveillance.firebasestorage.app",
+      messagingSenderId: "320221952933",
+      appId: "1:320221952933:web:55b970e848d652c9ab464c",
+      measurementId: "G-4XZJNZ7CSW"
+    };
+    
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+    const appId = "aurabienveillance-trading"; // Identifiant pour structurer ta base de données
+
+    // --- ACTUALITÉS ALÉATOIRES ---
+    const NEWS_EVENTS = [
+      { text: "Elon Musk tweete un mème sur l'entreprise.", impact: 15 },
+      { text: "Faille de sécurité majeure découverte dans le système.", impact: -20 },
+      { text: "Nouveau partenariat stratégique avec un géant de la tech.", impact: 12 },
+      { text: "Rumeurs insistantes de faillite imminente.", impact: -25 },
+      { text: "Bénéfices records annoncés ce trimestre !", impact: 18 },
+      { text: "Le PDG démissionne soudainement.", impact: -15 },
+      { text: "Adoption massive de la technologie par le grand public.", impact: 10 },
+      { text: "Un concurrent lance un produit nettement supérieur.", impact: -12 },
+      { text: "L'entreprise achète pour 1 milliard de Bitcoin.", impact: 8 },
+      { text: "Enquête du régulateur financier ouverte aujourd'hui.", impact: -18 },
+    ];
+
+    // --- COMPOSANT GRAPHIQUE SVG SUR MESURE ---
+    const SparklineChart = ({ data, isPositive, averageBuyPrice, sharesCount }) => {
+      const containerRef = useRef(null);
+      const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
+
+      useEffect(() => {
+        const updateSize = () => {
+          if (containerRef.current) {
+            setDimensions({
+              width: containerRef.current.offsetWidth,
+              height: containerRef.current.offsetHeight
+            });
+          }
+        };
+        window.addEventListener('resize', updateSize);
+        updateSize();
+        return () => window.removeEventListener('resize', updateSize);
+      }, []);
+
+      const { width, height } = dimensions;
+
+      const chartStats = useMemo(() => {
+        if (!data || data.length === 0 || width === 0) return null;
+        
+        let minVal = Math.min(...data);
+        let maxVal = Math.max(...data);
+        
+        // On adapte l'échelle si le joueur a des actions pour toujours voir sa ligne d'achat
+        if (sharesCount > 0 && averageBuyPrice) {
+          minVal = Math.min(minVal, averageBuyPrice);
+          maxVal = Math.max(maxVal, averageBuyPrice);
+        }
+
+        minVal *= 0.99; // Marge basse
+        maxVal *= 1.01; // Marge haute
+        const range = maxVal - minVal || 1;
+
+        const points = data.map((val, index) => {
+          const x = (index / (data.length - 1)) * width;
+          const y = height - ((val - minVal) / range) * height;
+          return `${x},${y}`;
+        });
+
+        return {
+          path: `M ${points.join(' L ')}`,
+          minVal,
+          maxVal,
+          range
+        };
+      }, [data, width, height, averageBuyPrice, sharesCount]);
+
+      const color = isPositive ? '#10b981' : '#f43f5e'; // Emerald ou Rose
+
+      return (
+        <div ref={containerRef} className="w-full h-full relative overflow-hidden">
+          {width > 0 && chartStats && (
+            <svg width={width} height={height} className="overflow-visible">
+              <defs>
+                <linearGradient id="gradient" x1="0" x2="0" y1="0" y2="1">
+                  <stop offset="0%" stopColor={color} stopOpacity="0.3" />
+                  <stop offset="100%" stopColor={color} stopOpacity="0.0" />
+                </linearGradient>
+              </defs>
+              
+              {/* Remplissage sous la courbe */}
+              <path
+                d={`${chartStats.path} L ${width},${height} L 0,${height} Z`}
+                fill="url(#gradient)"
+                className="transition-all duration-300 ease-linear"
+              />
+              
+              {/* Ligne principale */}
+              <path
+                d={chartStats.path}
+                fill="none"
+                stroke={color}
+                strokeWidth="3"
+                strokeLinejoin="round"
+                strokeLinecap="round"
+                className="transition-all duration-300 ease-linear"
+                style={{ filter: `drop-shadow(0 0 8px ${color}88)` }}
+              />
+              
+              {/* Ligne d'achat du joueur (pointillés) */}
+              {sharesCount > 0 && averageBuyPrice && (
+                <g className="transition-all duration-500 ease-in-out">
+                  <line
+                    x1="0"
+                    y1={height - ((averageBuyPrice - chartStats.minVal) / chartStats.range) * height}
+                    x2={width}
+                    y2={height - ((averageBuyPrice - chartStats.minVal) / chartStats.range) * height}
+                    stroke="#a1a1aa" // zinc-400
+                    strokeWidth="2"
+                    strokeDasharray="8,6"
+                    className="opacity-70"
+                  />
+                  <rect 
+                    x="10" 
+                    y={height - ((averageBuyPrice - chartStats.minVal) / chartStats.range) * height - 24} 
+                    width="80" 
+                    height="20" 
+                    rx="4" 
+                    fill="#27272a" 
+                    className="opacity-90"
+                  />
+                  <text
+                    x="16"
+                    y={height - ((averageBuyPrice - chartStats.minVal) / chartStats.range) * height - 10}
+                    fill="#a1a1aa"
+                    fontSize="11"
+                    fontWeight="bold"
+                    fontFamily="monospace"
+                  >
+                    ACHAT: ${averageBuyPrice.toFixed(1)}
+                  </text>
+                </g>
+              )}
+
+              {/* Point clignotant actuel */}
+              <circle
+                 cx={width}
+                 cy={height - ((data[data.length - 1] - chartStats.minVal) / chartStats.range) * height}
+                 r="5"
+                 fill={color}
+                 className="animate-pulse"
+                 style={{ filter: `drop-shadow(0 0 10px ${color})` }}
+              />
+            </svg>
+          )}
+        </div>
+      );
+    };
+
+    // --- COMPOSANT PRINCIPAL ---
+    function App() {
+      const [user, setUser] = useState(null);
+      const [portfolio, setPortfolio] = useState(null);
+      const [market, setMarket] = useState(null);
+      const [isLoading, setIsLoading] = useState(true);
+
+      // Authentification et Initialisation
+      useEffect(() => {
+        const initAuth = async () => {
+          try {
+            await signInAnonymously(auth);
+          } catch (error) {
+            console.error("Erreur d'authentification Firebase. Pensez à activer 'Anonyme' dans la console.", error);
+          }
+        };
+        initAuth();
+
+        const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+          setUser(currentUser);
+        });
+        return () => unsubscribe();
+      }, []);
+
+      // Chargement des données Firestore (Portfolio et Marché)
+      useEffect(() => {
+        if (!user) return;
+
+        const marketRef = doc(db, 'artifacts', appId, 'public', 'data', 'market', 'global');
+        const portfolioRef = doc(db, 'artifacts', appId, 'users', user.uid, 'portfolio', 'state');
+
+        // Setup initial du marché si inexistant
+        const initMarket = async () => {
+          const snap = await getDoc(marketRef);
+          if (!snap.exists()) {
+            await setDoc(marketRef, {
+              price: 100.00,
+              history: Array(40).fill(100.00),
+              trend: 0,
+              news: "Lancement du marché Tradex.",
+              newsType: 'neutral',
+              lastUpdate: Date.now(),
+              leaderId: user.uid, // Le premier arrivé devient le leader
+              leaderHeartbeat: Date.now()
+            });
+          }
+        };
+        initMarket();
+
+        // Setup initial du portfolio si inexistant
+        const initPortfolio = async () => {
+          const snap = await getDoc(portfolioRef);
+          if (!snap.exists()) {
+            await setDoc(portfolioRef, {
+              balance: 10000.00,
+              shares: 0,
+              averageBuyPrice: 0
+            });
+          }
+        };
+        initPortfolio();
+
+        // Écouteurs temps réel
+        const unsubMarket = onSnapshot(marketRef, (docSnap) => {
+          if (docSnap.exists()) setMarket(docSnap.data());
+        }, (error) => console.error("Erreur market:", error));
+
+        const unsubPortfolio = onSnapshot(portfolioRef, (docSnap) => {
+          if (docSnap.exists()) {
+            setPortfolio(docSnap.data());
+            setIsLoading(false);
+          }
+        }, (error) => console.error("Erreur portfolio:", error));
+
+        return () => {
+          unsubMarket();
+          unsubPortfolio();
+        };
+      }, [user]);
+
+      // Moteur de simulation (Market Maker Local)
+      useEffect(() => {
+        if (!market || !user) return;
+
+        const intervalId = setInterval(async () => {
+          const marketRef = doc(db, 'artifacts', appId, 'public', 'data', 'market', 'global');
+          const now = Date.now();
+          
+          const isLeader = market.leaderId === user.uid;
+          const leaderIsDead = (now - (market.leaderHeartbeat || 0)) > 5000;
+
+          // --- SYSTÈME D'ÉLECTION DE LEADER ---
+          // Si le leader actuel est inactif depuis 5 secondes, on s'approprie le rôle de leader.
+          if (leaderIsDead && !isLeader) {
+            await setDoc(marketRef, { leaderId: user.uid, leaderHeartbeat: now }, { merge: true });
+            return; 
+          }
+
+          // Seul le Leader en titre a le droit de générer la suite du graphique
+          if (isLeader && (now - market.lastUpdate > 2000)) {
+            
+            let newTrend = market.trend * 0.95; // La tendance se calme avec le temps
+            let currentNews = market.news;
+            let currentNewsType = market.newsType;
+
+            // Bruit aléatoire standard
+            newTrend += (Math.random() - 0.5) * 1.5;
+
+            // Spawn d'actualité aléatoire (environ 3% de chance par tick)
+            if (Math.random() < 0.03) {
+              const event = NEWS_EVENTS[Math.floor(Math.random() * NEWS_EVENTS.length)];
+              newTrend += event.impact;
+              currentNews = event.text;
+              currentNewsType = event.impact > 0 ? 'positive' : 'negative';
+            }
+
+            // Calcul du nouveau prix
+            let newPrice = market.price + newTrend;
+            if (newPrice < 1) newPrice = 1; // Pas de prix négatif
+
+            // Mise à jour de l'historique
+            const newHistory = [...market.history, newPrice];
+            if (newHistory.length > 50) newHistory.shift();
+
+            // Le Leader pousse la mise à jour pour tout le monde
+            try {
+              await setDoc(marketRef, {
+                price: newPrice,
+                history: newHistory,
+                trend: newTrend,
+                news: currentNews,
+                newsType: currentNewsType,
+                lastUpdate: now,
+                leaderHeartbeat: now // Maintient le rôle de leader
+              }, { merge: true });
+            } catch (e) {
+              // Ignorer les conflits d'écriture
+            }
+          }
+        }, 1000);
+
+        return () => clearInterval(intervalId);
+      }, [market, user]);
+
+      // Actions de trading
+      const handleTrade = async (type) => {
+        if (!market || !portfolio || !user) return;
+
+        const marketRef = doc(db, 'artifacts', appId, 'public', 'data', 'market', 'global');
+        const portfolioRef = doc(db, 'artifacts', appId, 'users', user.uid, 'portfolio', 'state');
+
+        const currentPrice = market.price;
+        let newBalance = portfolio.balance;
+        let newShares = portfolio.shares;
+        let newAverageBuyPrice = portfolio.averageBuyPrice || 0;
+        let impactOnTrend = 0;
+
+        if (type === 'BUY') {
+          if (portfolio.balance >= currentPrice) {
+            // Calcul du nouveau Prix de Revient Unitaire (moyenne)
+            newAverageBuyPrice = ((portfolio.shares * newAverageBuyPrice) + currentPrice) / (portfolio.shares + 1);
+            
+            newBalance -= currentPrice;
+            newShares += 1;
+            impactOnTrend = 2; // L'achat fait monter la courbe
+          } else {
+            return; // Pas assez de fonds
+          }
+        } else if (type === 'SELL') {
+          if (portfolio.shares > 0) {
+            newBalance += currentPrice;
+            newShares -= 1;
+            impactOnTrend = -2; // La vente fait descendre la courbe
+            
+            // Si on vend tout, on reset le prix d'achat
+            if (newShares === 0) newAverageBuyPrice = 0;
+          } else {
+            return; // Pas d'actions à vendre
+          }
+        }
+
+        // Mise à jour locale (optimiste)
+        setPortfolio({ balance: newBalance, shares: newShares, averageBuyPrice: newAverageBuyPrice });
+
+        // Mise à jour base de données
+        await setDoc(portfolioRef, { balance: newBalance, shares: newShares, averageBuyPrice: newAverageBuyPrice });
+        
+        // Impact sur le marché global
+        await setDoc(marketRef, {
+          trend: market.trend + impactOnTrend,
+          lastUpdate: Date.now() // Force les autres clients à prendre notre modif
+        }, { merge: true });
+      };
+
+      if (isLoading || !market) {
+        return (
+          <div className="min-h-screen bg-[#09090b] flex items-center justify-center text-emerald-500 font-mono">
+            <Activity className="animate-spin w-8 h-8 mr-3" /> Initialisation du Terminal...
+          </div>
+        );
+      }
+
+      const isPositiveTrend = market.history[market.history.length - 1] >= market.history[market.history.length - 2];
+      const priceDiff = market.price - market.history[0];
+      const percentChange = (priceDiff / market.history[0]) * 100;
+      
+      const totalValue = portfolio.balance + (portfolio.shares * market.price);
+
+      return (
+        <div className="min-h-screen bg-[#09090b] text-zinc-100 font-sans selection:bg-emerald-500/30">
+          
+          {/* HEADER / NAVBAR */}
+          <header className="border-b border-zinc-800 bg-[#09090b]/80 backdrop-blur-md sticky top-0 z-50">
+            <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Globe className="w-6 h-6 text-emerald-400" />
+                <h1 className="text-xl font-bold tracking-tight">TRADEX<span className="text-emerald-500">.LIVE</span></h1>
+              </div>
+              
+              <div className="flex gap-6 text-sm">
+                <div className="flex flex-col items-end">
+                  <span className="text-zinc-500 flex items-center gap-1"><Briefcase className="w-4 h-4"/> Portefeuille</span>
+                  <span className="font-mono text-lg font-medium">{totalValue.toLocaleString('fr-FR', { style: 'currency', currency: 'USD' })}</span>
+                </div>
+              </div>
+            </div>
+          </header>
+
+          <main className="max-w-6xl mx-auto px-6 py-8 grid grid-cols-1 lg:grid-cols-3 gap-8">
+            
+            {/* COLONNE PRINCIPALE : GRAPHIQUE */}
+            <div className="lg:col-span-2 space-y-6">
+              
+              {/* En-tête du graphique */}
+              <div className="flex justify-between items-end">
+                <div>
+                  <p className="text-zinc-400 text-sm mb-1 uppercase tracking-wider font-semibold">Tension du Marché (Global)</p>
+                  <div className="flex items-baseline gap-3">
+                    <h2 className="text-5xl font-bold font-mono tracking-tighter">
+                      ${market.price.toFixed(2)}
+                    </h2>
+                    <span className={`flex items-center font-mono text-lg ${isPositiveTrend ? 'text-emerald-400' : 'text-rose-400'}`}>
+                      {isPositiveTrend ? <TrendingUp className="w-5 h-5 mr-1" /> : <TrendingDown className="w-5 h-5 mr-1" />}
+                      {Math.abs(percentChange).toFixed(2)}%
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* LA COURBE (CHART) */}
+              <div className="h-96 w-full bg-[#121214] border border-zinc-800 rounded-2xl p-4 shadow-2xl relative">
+                <SparklineChart 
+                  data={market.history} 
+                  isPositive={isPositiveTrend} 
+                  averageBuyPrice={portfolio?.averageBuyPrice}
+                  sharesCount={portfolio?.shares}
+                />
+                
+                {/* Overlay Grid subtil */}
+                <div className="absolute inset-0 pointer-events-none opacity-[0.03]" style={{ backgroundImage: 'linear-gradient(to right, #fff 1px, transparent 1px), linear-gradient(to bottom, #fff 1px, transparent 1px)', backgroundSize: '40px 40px' }}></div>
+              </div>
+
+              {/* NEWS TICKER */}
+              <div className={`p-4 rounded-xl border flex items-start gap-4 transition-colors duration-500 ${
+                market.newsType === 'positive' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-200' : 
+                market.newsType === 'negative' ? 'bg-rose-500/10 border-rose-500/20 text-rose-200' : 
+                'bg-zinc-800/50 border-zinc-700/50 text-zinc-300'
+              }`}>
+                <Zap className={`w-6 h-6 shrink-0 mt-0.5 ${market.newsType === 'positive' ? 'text-emerald-400' : market.newsType === 'negative' ? 'text-rose-400' : 'text-zinc-400'}`} />
+                <div>
+                  <p className="text-xs uppercase font-bold opacity-70 mb-1">Dernière Actualité</p>
+                  <p className="text-lg font-medium leading-snug">{market.news}</p>
+                </div>
+              </div>
+
+            </div>
+
+            {/* COLONNE LATÉRALE : CONTRÔLES */}
+            <div className="space-y-6">
+              
+              {/* Panneau utilisateur */}
+              <div className="bg-[#121214] border border-zinc-800 rounded-2xl p-6 shadow-xl">
+                <h3 className="text-lg font-semibold mb-6 flex items-center gap-2 border-b border-zinc-800 pb-4">
+                  <DollarSign className="w-5 h-5 text-emerald-500" /> Vos Fonds
+                </h3>
+                
+                <div className="space-y-4 mb-8">
+                  <div className="flex justify-between items-center bg-zinc-900/50 p-3 rounded-lg border border-zinc-800/50">
+                    <span className="text-zinc-400">Liquidités</span>
+                    <span className="font-mono text-xl">{portfolio.balance.toLocaleString('fr-FR', { style: 'currency', currency: 'USD' })}</span>
+                  </div>
+                  <div className="flex justify-between items-center bg-zinc-900/50 p-3 rounded-lg border border-zinc-800/50">
+                    <span className="text-zinc-400">Actions possedées</span>
+                    <span className="font-mono text-xl font-bold text-blue-400">{portfolio.shares} <span className="text-sm font-normal text-zinc-600">unités</span></span>
+                  </div>
+                  {portfolio.shares > 0 && (
+                        <div className="flex justify-between items-center bg-zinc-900/50 p-3 rounded-lg border border-zinc-800/50">
+                          <span className="text-zinc-400">Prix d'achat moyen</span>
+                          <span className="font-mono text-lg text-zinc-300">${(portfolio.averageBuyPrice || 0).toFixed(2)}</span>
+                        </div>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <button
+                    onClick={() => handleTrade('BUY')}
+                    disabled={portfolio.balance < market.price}
+                    className="relative overflow-hidden group bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-xl py-4 font-bold text-lg transition-all active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed"
+                  >
+                    <div className="absolute inset-0 bg-gradient-to-t from-emerald-500/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                    ACHETER
+                  </button>
+                  
+                  <button
+                    onClick={() => handleTrade('SELL')}
+                    disabled={portfolio.shares <= 0}
+                    className="relative overflow-hidden group bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-xl py-4 font-bold text-lg transition-all active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed"
+                  >
+                    <div className="absolute inset-0 bg-gradient-to-t from-rose-500/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                    VENDRE
+                  </button>
+                </div>
+
+                <p className="text-xs text-zinc-600 mt-6 text-center flex items-center justify-center gap-1">
+                  <AlertCircle className="w-3 h-3" /> Vos actions influencent le cours global en temps réel.
+                </p>
+              </div>
+
+            </div>
+          </main>
+        </div>
+      );
+    }
+
+    // Initialisation et rendu de l'application
+    const root = createRoot(document.getElementById('root'));
+    root.render(<App />);
+    </script>
+</body>
+</html>
