@@ -11,15 +11,15 @@
     <!-- Babel pour lire le code React (JSX) directement dans le navigateur -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-    <!-- Import Map pour charger React, Firebase et les icônes depuis esm.sh -->
+    <!-- Import Map pour charger React, Firebase et les icônes -->
     <script type="importmap">
     {
         "imports": {
             "react": "https://esm.sh/react@18.2.0",
             "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
-            "firebase/app": "https://esm.sh/firebase@10.8.0/app",
-            "firebase/auth": "https://esm.sh/firebase@10.8.0/auth",
-            "firebase/firestore": "https://esm.sh/firebase@10.8.0/firestore",
+            "firebase/app": "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js",
+            "firebase/auth": "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js",
+            "firebase/firestore": "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js",
             "lucide-react": "https://esm.sh/lucide-react@0.330.0"
         }
     }
@@ -30,7 +30,7 @@
     <!-- Conteneur principal où le site va s'afficher -->
     <div id="root"></div>
 
-    <!-- NOTRE CODE (Exactement le même que précédemment) -->
+    <!-- NOTRE CODE -->
     <script type="text/babel" data-type="module">
     import React, { useState, useEffect, useRef, useMemo } from 'react';
     import { createRoot } from 'react-dom/client';
