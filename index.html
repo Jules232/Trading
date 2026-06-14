@@ -39,7 +39,7 @@
         window.__app_id = "aurabienveillance-trading";
     </script>
 </head>
-<body class="bg-[#09090b] text-zinc-100 min-h-screen">
+<body class="bg-[#09090b] text-zinc-100 min-h-screen select-none">
     
     <!-- Conteneur principal du site -->
     <div id="root"></div>
@@ -75,8 +75,12 @@
       Globe,
       Users,
       Gift,
-      LineChart, /* <-- NOUVEAU: Icone onglet Trade */
-      Trophy     /* <-- NOUVEAU: Icone onglet Classement */
+      LineChart,
+      Trophy,
+      Info,
+      X,
+      Flame,
+      Coins
     } from 'lucide-react';
 
     // --- INITIALISATION FIREBASE ---
@@ -88,20 +92,41 @@
 
     // --- PARAMÈTRES DU JEU ---
     const REWARD_COOLDOWN = 24 * 60 * 60 * 1000; // 24 heures en millisecondes
-    const REWARD_AMOUNT = 500; // Montant du bonus journalier
+    const REWARD_AMOUNT = 500; // Montant de base du bonus journalier
+    const MAX_STAKING_RESERVOIR = 50.00; // Intérêt passif cumulable max
+    const STAKING_RATE = 0.05; // $ accumulés par seconde
 
-    // --- ACTUALITÉS ALÉATOIRES ---
+    // --- ACTUALITÉS ALÉATOIRES (ENRICHIES) ---
     const NEWS_EVENTS = [
       { text: "Elon Musk tweete un mème sur l'entreprise.", impact: 15 },
       { text: "Faille de sécurité majeure découverte dans le système.", impact: -20 },
       { text: "Nouveau partenariat stratégique avec un géant de la tech.", impact: 12 },
-      { text: "Rumeurs insistantes de faillite imminente.", impact: -25 },
+      { text: "Rumeurs d'une régulation drastique imminente.", impact: -25 },
       { text: "Bénéfices records annoncés ce trimestre !", impact: 18 },
       { text: "Le PDG démissionne soudainement.", impact: -15 },
       { text: "Adoption massive de la technologie par le grand public.", impact: 10 },
       { text: "Un concurrent lance un produit nettement supérieur.", impact: -12 },
       { text: "L'entreprise achète pour 1 milliard de Bitcoin.", impact: 8 },
       { text: "Enquête du régulateur financier ouverte aujourd'hui.", impact: -18 },
+      { text: "La FED annonce une hausse surprise des taux d'intérêt.", impact: -18 },
+      { text: "L'inflation ralentit enfin, les investisseurs respirent.", impact: 14 },
+      { text: "Grosse panne des serveurs cloud affectant les opérations.", impact: -15 },
+      { text: "Découverte majeure dans l'intelligence artificielle.", impact: 20 },
+      { text: "Un pays clé interdit les transactions liées au projet.", impact: -22 },
+      { text: "Rachat surprise par un conglomérat asiatique.", impact: 25 },
+      { text: "Fuite de données affectant 5 millions d'utilisateurs.", impact: -20 },
+      { text: "Nouveaux subsides gouvernementaux pour le secteur.", impact: 10 },
+      { text: "Pénurie mondiale de composants critiques.", impact: -14 },
+      { text: "Un influenceur financier très suivi recommande l'action.", impact: 12 },
+      { text: "Scandale de fraude fiscale touchant les dirigeants.", impact: -30 },
+      { text: "Lancement d'un produit révolutionnaire très attendu.", impact: 18 },
+      { text: "Grève générale des employés pour de meilleures conditions.", impact: -10 },
+      { text: "Rumeur de fusion avec le principal concurrent.", impact: 15 },
+      { text: "Les résultats trimestriels sont pires que prévus.", impact: -16 },
+      { text: "Une baleine a liquidé 10% de toutes les parts du marché.", impact: -25 },
+      { text: "Mise à jour majeure du réseau déployée sans accroc.", impact: 12 },
+      { text: "Un hedge fund célèbre annonce parier à la baisse (short).", impact: -15 },
+      { text: "Adoption de la technologie par une institution majeure.", impact: 30 }
     ];
 
     // --- COMPOSANT GRAPHIQUE SVG SUR MESURE ---
@@ -113,32 +138,38 @@
         const updateSize = () => {
           if (containerRef.current) {
             setDimensions({
-              width: containerRef.current.offsetWidth,
-              height: containerRef.current.offsetHeight
+              width: containerRef.current.clientWidth || containerRef.current.offsetWidth || 0,
+              height: containerRef.current.clientHeight || containerRef.current.offsetHeight || 0
             });
           }
         };
+        
+        // Timeout pour éviter un calcul à 0 lors d'un chargement asynchrone ou d'un changement d'onglet
+        const timer = setTimeout(updateSize, 100);
+
         window.addEventListener('resize', updateSize);
         updateSize();
-        return () => window.removeEventListener('resize', updateSize);
-      }, []);
+        return () => {
+          window.removeEventListener('resize', updateSize);
+          clearTimeout(timer);
+        };
+      }, [data]);
 
       const { width, height } = dimensions;
 
       const chartStats = useMemo(() => {
-        if (!data || data.length === 0 || width === 0) return null;
+        if (!data || data.length === 0 || width === 0 || height === 0) return null;
         
         let minVal = Math.min(...data);
         let maxVal = Math.max(...data);
         
-        // On adapte l'échelle si le joueur a des actions pour toujours voir sa ligne d'achat
         if (sharesCount > 0 && averageBuyPrice) {
           minVal = Math.min(minVal, averageBuyPrice);
           maxVal = Math.max(maxVal, averageBuyPrice);
         }
 
-        minVal *= 0.99; // Marge basse
-        maxVal *= 1.01; // Marge haute
+        minVal *= 0.99;
+        maxVal *= 1.01;
         const range = maxVal - minVal || 1;
 
         const points = data.map((val, index) => {
@@ -155,11 +186,11 @@
         };
       }, [data, width, height, averageBuyPrice, sharesCount]);
 
-      const color = isPositive ? '#10b981' : '#f43f5e'; // Emerald ou Rose
+      const color = isPositive ? '#10b981' : '#f43f5e';
 
       return (
         <div ref={containerRef} className="w-full h-full relative overflow-hidden">
-          {width > 0 && chartStats && (
+          {width > 0 && height > 0 && chartStats && (
             <svg width={width} height={height} className="overflow-visible">
               <defs>
                 <linearGradient id="gradient" x1="0" x2="0" y1="0" y2="1">
@@ -168,14 +199,12 @@
                 </linearGradient>
               </defs>
               
-              {/* Remplissage sous la courbe */}
               <path
                 d={`${chartStats.path} L ${width},${height} L 0,${height} Z`}
                 fill="url(#gradient)"
                 className="transition-all duration-300 ease-linear"
               />
               
-              {/* Ligne principale */}
               <path
                 d={chartStats.path}
                 fill="none"
@@ -187,7 +216,6 @@
                 style={{ filter: `drop-shadow(0 0 8px ${color}88)` }}
               />
               
-              {/* Ligne d'achat du joueur (pointillés) */}
               {sharesCount > 0 && averageBuyPrice > 0 && (
                 <g className="transition-all duration-500 ease-in-out">
                   <line
@@ -195,25 +223,25 @@
                     y1={height - ((averageBuyPrice - chartStats.minVal) / chartStats.range) * height}
                     x2={width}
                     y2={height - ((averageBuyPrice - chartStats.minVal) / chartStats.range) * height}
-                    stroke="#a1a1aa" // zinc-400
-                    strokeWidth="2"
-                    strokeDasharray="8,6"
+                    stroke="#a1a1aa"
+                    strokeWidth="1.5"
+                    strokeDasharray="6,4"
                     className="opacity-70"
                   />
                   <rect 
                     x="10" 
-                    y={height - ((averageBuyPrice - chartStats.minVal) / chartStats.range) * height - 24} 
-                    width="80" 
-                    height="20" 
+                    y={Math.max(5, Math.min(height - 25, height - ((averageBuyPrice - chartStats.minVal) / chartStats.range) * height - 12))} 
+                    width="74" 
+                    height="18" 
                     rx="4" 
                     fill="#27272a" 
-                    className="opacity-90"
+                    className="opacity-95"
                   />
                   <text
-                    x="16"
-                    y={height - ((averageBuyPrice - chartStats.minVal) / chartStats.range) * height - 10}
-                    fill="#a1a1aa"
-                    fontSize="11"
+                    x="14"
+                    y={Math.max(17, Math.min(height - 13, height - ((averageBuyPrice - chartStats.minVal) / chartStats.range) * height + 1))}
+                    fill="#e4e4e7"
+                    fontSize="9"
                     fontWeight="bold"
                     fontFamily="monospace"
                   >
@@ -222,7 +250,6 @@
                 </g>
               )}
 
-              {/* Point clignotant actuel */}
               <circle
                  cx={width}
                  cy={height - ((data[data.length - 1] - chartStats.minVal) / chartStats.range) * height}
@@ -247,18 +274,19 @@
       const [onlineCount, setOnlineCount] = useState(1);
       const [timeToReward, setTimeToReward] = useState(0);
 
-      // --- NOUVEAUX ÉTATS (NAVIGATION ET LEADERBOARD) ---
-      const [activeTab, setActiveTab] = useState('trade'); // 'trade', 'rewards', 'leaderboard'
+      const [activeTab, setActiveTab] = useState('trade');
       const [leaderboard, setLeaderboard] = useState([]);
       const [pseudoInput, setPseudoInput] = useState('');
+      const [showInfo, setShowInfo] = useState(false);
 
-      // Garder une référence temps réel du marché pour éviter de recréer l'intervalle de mise à jour
+      // --- NOUVEAU: ÉTAT D'ACCUMULATION D'INTÉRÊTS ACTIFS ---
+      const [stakingEarnings, setStakingEarnings] = useState(0);
+
       const marketRefState = useRef(market);
       useEffect(() => {
         marketRefState.current = market;
       }, [market]);
 
-      // Authentification et Initialisation
       useEffect(() => {
         const initAuth = async () => {
           try {
@@ -266,7 +294,6 @@
               try {
                 await signInWithCustomToken(auth, __initial_auth_token);
               } catch (tokenError) {
-                console.warn("Le jeton personnalisé ne correspond pas au projet, basculement en mode anonyme.");
                 await signInAnonymously(auth);
               }
             } else {
@@ -284,7 +311,6 @@
         return () => unsubscribe();
       }, []);
 
-      // Gestion de la Présence (Joueurs en ligne)
       useEffect(() => {
         if (!user) return;
 
@@ -314,14 +340,12 @@
         };
       }, [user]);
 
-      // Chargement des données Firestore (Portfolio et Marché)
       useEffect(() => {
         if (!user) return;
 
         const marketRef = doc(db, 'artifacts', appId, 'public', 'data', 'market', 'global');
         const portfolioRef = doc(db, 'artifacts', appId, 'users', user.uid, 'portfolio', 'state');
 
-        // Setup initial du marché si inexistant
         const initMarket = async () => {
           const snap = await getDoc(marketRef);
           if (!snap.exists()) {
@@ -339,7 +363,6 @@
         };
         initMarket();
 
-        // Setup initial du portfolio si inexistant
         const initPortfolio = async () => {
           const snap = await getDoc(portfolioRef);
           if (!snap.exists()) {
@@ -348,13 +371,14 @@
               shares: 0,
               averageBuyPrice: 0,
               lastRewardClaim: 0,
-              pseudo: "" // NOUVEAU: champ pseudo initialisé vide
+              pseudo: "",
+              streak: 1, // Nouvelle valeur de streak par défaut
+              lastRewardDate: "" // Pour vérifier si réclamé le lendemain
             });
           }
         };
         initPortfolio();
 
-        // Écouteurs temps réel
         const unsubMarket = onSnapshot(marketRef, (docSnap) => {
           if (docSnap.exists()) setMarket(docSnap.data());
         }, (error) => console.error("Erreur market:", error));
@@ -372,14 +396,11 @@
         };
       }, [user]);
 
-      // --- NOUVEAU : ENREGISTRER LE SCORE DU JOUEUR DANS LE CLASSEMENT PUBLIC ---
+      // Calcul des scores en temps réel pour le Leaderboard public
       useEffect(() => {
         if (!user || !portfolio || !market || !portfolio.pseudo) return;
-        
-        // Pousse le score actuel vers la collection publique
         const totalValue = portfolio.balance + (portfolio.shares * market.price);
         const lbRef = doc(db, 'artifacts', appId, 'public', 'data', 'leaderboard', user.uid);
-        
         setDoc(lbRef, {
           pseudo: portfolio.pseudo,
           totalValue: totalValue,
@@ -387,25 +408,21 @@
         }, { merge: true }).catch(e => console.error("Erreur maj score:", e));
       }, [user, portfolio?.balance, portfolio?.shares, portfolio?.pseudo, market?.price]);
 
-      // --- NOUVEAU : LIRE LE CLASSEMENT PUBLIC ---
       useEffect(() => {
         if (!user) return;
         const lbCol = collection(db, 'artifacts', appId, 'public', 'data', 'leaderboard');
         const unsubLeaderboard = onSnapshot(lbCol, (snapshot) => {
           let data = [];
           snapshot.forEach(d => data.push(d.data()));
-          // Tri en mémoire (pour éviter les erreurs d'index Firestore)
           data.sort((a, b) => b.totalValue - a.totalValue);
-          setLeaderboard(data.slice(0, 50)); // Top 50 uniquement
+          setLeaderboard(data.slice(0, 50));
         });
         return () => unsubLeaderboard();
       }, [user]);
 
-
-      // Compte à rebours du bonus
+      // Compte à rebours du salaire journalier
       useEffect(() => {
         if (!portfolio) return;
-        
         const updateTimer = () => {
           if (!portfolio.lastRewardClaim) {
             setTimeToReward(0);
@@ -414,14 +431,24 @@
           const remaining = REWARD_COOLDOWN - (Date.now() - portfolio.lastRewardClaim);
           setTimeToReward(remaining > 0 ? remaining : 0);
         };
-
         updateTimer();
         const timerInterval = setInterval(updateTimer, 1000);
         return () => clearInterval(timerInterval);
       }, [portfolio?.lastRewardClaim]);
 
+      // --- NOUVEAU: COMPTEUR DE MINAGE/STAKING PASSIF EN TEMPS RÉEL (Si actif sur l'onglet) ---
+      useEffect(() => {
+        if (!user || isLoading) return;
+        const interval = setInterval(() => {
+          setStakingEarnings(prev => {
+            if (prev >= MAX_STAKING_RESERVOIR) return MAX_STAKING_RESERVOIR;
+            return parseFloat((prev + STAKING_RATE).toFixed(2));
+          });
+        }, 1000);
+        return () => clearInterval(interval);
+      }, [user, isLoading]);
 
-      // Moteur de simulation (Market Maker Local) lié uniquement au cycle de vie de l'utilisateur
+      // Moteur de simulation (Market Maker Local)
       useEffect(() => {
         if (!user) return;
 
@@ -435,20 +462,19 @@
           const isLeader = currentMarket.leaderId === user.uid;
           const leaderIsDead = (now - (currentMarket.leaderHeartbeat || 0)) > 5000;
 
-          // Système d'élection
           if (leaderIsDead && !isLeader) {
             await setDoc(marketRef, { leaderId: user.uid, leaderHeartbeat: now }, { merge: true });
             return; 
           }
 
           if (isLeader && (now - currentMarket.lastUpdate > 1500)) {
-            let newTrend = currentMarket.trend * 0.95;
+            let newTrend = currentMarket.trend * 0.92;
             let currentNews = currentMarket.news;
             let currentNewsType = currentMarket.newsType;
 
-            newTrend += (Math.random() - 0.5) * 1.5;
+            newTrend += (Math.random() - 0.5) * 2.5;
 
-            if (Math.random() < 0.03) {
+            if (Math.random() < 0.05) {
               const event = NEWS_EVENTS[Math.floor(Math.random() * NEWS_EVENTS.length)];
               newTrend += event.impact;
               currentNews = event.text;
@@ -488,14 +514,63 @@
         return () => clearInterval(intervalId);
       }, [user?.uid]);
 
-
+      // --- NOUVEAU: COLLECTE DE SALAIRE ET GESTION DE STREAK SUR FIREBASE ---
       const handleClaimReward = async () => {
         if (!user || !portfolio || timeToReward > 0) return;
         const portfolioRef = doc(db, 'artifacts', appId, 'users', user.uid, 'portfolio', 'state');
-        setPortfolio(prev => ({ ...prev, balance: prev.balance + REWARD_AMOUNT, lastRewardClaim: Date.now() }));
+        
+        const now = Date.now();
+        const oneDayMs = 24 * 60 * 60 * 1000;
+        const lastClaim = portfolio.lastRewardClaim || 0;
+        
+        let newStreak = portfolio.streak || 1;
+        
+        if (lastClaim > 0) {
+          const delay = now - lastClaim;
+          if (delay < oneDayMs * 2) {
+            // Moins de 48 heures se sont écoulées : on incrémente la série (max 7)
+            newStreak = Math.min(newStreak + 1, 7);
+          } else {
+            // Plus de 48h, le joueur a brisé sa série quotidienne
+            newStreak = 1;
+          }
+        } else {
+          newStreak = 1;
+        }
+
+        // Multiplicateur : +10% par jour de série (Jour 1 = 1.0, Jour 7 = 1.7x)
+        const multiplier = 1 + (newStreak - 1) * 0.10;
+        const finalSalary = Math.round(REWARD_AMOUNT * multiplier);
+
+        setPortfolio(prev => ({ 
+          ...prev, 
+          balance: prev.balance + finalSalary, 
+          lastRewardClaim: now,
+          streak: newStreak
+        }));
+
         await setDoc(portfolioRef, { 
-          balance: portfolio.balance + REWARD_AMOUNT, 
-          lastRewardClaim: Date.now() 
+          balance: portfolio.balance + finalSalary, 
+          lastRewardClaim: now,
+          streak: newStreak
+        }, { merge: true });
+      };
+
+      // --- NOUVEAU: RÉCOLTE DU MINAGE PASSIF ---
+      const handleClaimStaking = async () => {
+        if (!user || !portfolio || stakingEarnings <= 0) return;
+        const portfolioRef = doc(db, 'artifacts', appId, 'users', user.uid, 'portfolio', 'state');
+
+        const collectedAmount = stakingEarnings;
+        setStakingEarnings(0); // Réinitialisation immédiate locale
+
+        setPortfolio(prev => ({
+          ...prev,
+          balance: prev.balance + collectedAmount
+        }));
+
+        await setDoc(portfolioRef, {
+          balance: portfolio.balance + collectedAmount
         }, { merge: true });
       };
 
@@ -511,18 +586,22 @@
         let newAverageBuyPrice = portfolio.averageBuyPrice || 0;
         let impactOnTrend = 0;
 
+        const feeRate = 0.01;
+
         if (type === 'BUY') {
-          if (portfolio.balance >= currentPrice) {
-            newAverageBuyPrice = ((portfolio.shares * newAverageBuyPrice) + currentPrice) / (portfolio.shares + 1);
-            newBalance -= currentPrice;
+          const cost = currentPrice * (1 + feeRate);
+          if (portfolio.balance >= cost) {
+            newAverageBuyPrice = ((portfolio.shares * newAverageBuyPrice) + cost) / (portfolio.shares + 1);
+            newBalance -= cost;
             newShares += 1;
-            impactOnTrend = 2;
+            impactOnTrend = 0.5; 
           } else return;
         } else if (type === 'SELL') {
           if (portfolio.shares > 0) {
-            newBalance += currentPrice;
+            const gain = currentPrice * (1 - feeRate);
+            newBalance += gain;
             newShares -= 1;
-            impactOnTrend = -2;
+            impactOnTrend = -0.5; 
             if (newShares === 0) newAverageBuyPrice = 0;
           } else return;
         }
@@ -541,7 +620,6 @@
         }, { merge: true });
       };
 
-      // --- NOUVEAU : Fonction pour enregistrer son pseudo ---
       const handleSetPseudo = async () => {
         if (!user || !pseudoInput.trim()) return;
         const portfolioRef = doc(db, 'artifacts', appId, 'users', user.uid, 'portfolio', 'state');
@@ -556,7 +634,6 @@
         const s = totalSeconds % 60;
         return `${h}h ${m}m ${s}s`;
       };
-
 
       if (isLoading || !market) {
         return (
@@ -573,55 +650,62 @@
       const totalValue = portfolio.balance + (portfolio.shares * market.price);
 
       return (
-        <div className="min-h-screen bg-[#09090b] text-zinc-100 font-sans selection:bg-emerald-500/30 pb-24">
+        <div className="min-h-screen bg-[#09090b] text-zinc-100 font-sans selection:bg-emerald-500/30 pb-28">
           
           <header className="border-b border-zinc-800 bg-[#09090b]/80 backdrop-blur-md sticky top-0 z-40">
-            <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
+            <div className="max-w-6xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Globe className="w-6 h-6 text-emerald-400" />
-                <h1 className="text-xl font-bold tracking-tight">TRADEX<span className="text-emerald-500">.LIVE</span></h1>
+                <Globe className="w-5 h-5 sm:w-6 sm:h-6 text-emerald-400" />
+                <h1 className="text-lg sm:text-xl font-bold tracking-tight">TRADEX<span className="text-emerald-500">.LIVE</span></h1>
               </div>
               
-              <div className="flex gap-6 text-sm items-center">
-                <div className="flex items-center gap-2 bg-zinc-900/80 px-3 py-1.5 rounded-full border border-zinc-800" title="Traders en ligne">
-                  <span className="relative flex h-2.5 w-2.5">
+              <div className="flex gap-2 sm:gap-6 text-sm items-center">
+                <div className="flex items-center gap-1.5 sm:gap-2 bg-zinc-900/80 px-2 sm:px-3 py-1.5 rounded-full border border-zinc-800" title="Traders en ligne">
+                  <span className="relative flex h-2 w-2">
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
                   </span>
-                  <Users className="w-4 h-4 text-zinc-400" />
-                  <span className="font-mono font-medium text-zinc-300">{onlineCount}</span>
+                  <Users className="w-3.5 h-3.5 text-zinc-400" />
+                  <span className="font-mono text-xs sm:text-sm font-medium text-zinc-300">{onlineCount}</span>
                 </div>
 
-                <div className="flex flex-col items-end border-l border-zinc-800 pl-6 hidden sm:flex">
-                  <span className="text-zinc-500 flex items-center gap-1"><Briefcase className="w-4 h-4"/> Portefeuille</span>
-                  <span className="font-mono text-lg font-medium">{totalValue.toLocaleString('fr-FR', { style: 'currency', currency: 'USD' })}</span>
+                <div className="flex flex-col items-end border-l border-zinc-800 pl-3 sm:pl-6 hidden xs:flex">
+                  <span className="text-[10px] sm:text-xs text-zinc-500 flex items-center gap-1"><Briefcase className="w-3.5 h-3.5"/> Portefeuille</span>
+                  <span className="font-mono text-sm sm:text-base font-medium">{totalValue.toLocaleString('fr-FR', { style: 'currency', currency: 'USD' })}</span>
                 </div>
+
+                <button 
+                  onClick={() => setShowInfo(true)} 
+                  className="p-1.5 sm:p-2 bg-zinc-800 hover:bg-zinc-700 rounded-full transition-colors"
+                  title="Comment jouer ?"
+                >
+                  <Info className="w-4 h-4 text-zinc-300" />
+                </button>
               </div>
             </div>
           </header>
 
-          <main className="max-w-6xl mx-auto px-6 py-8">
+          <main className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
             
-            {/* ONGLET 1 : TRADING CLASSIQUE */}
             {activeTab === 'trade' && (
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                <div className="lg:col-span-2 space-y-6">
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 sm:gap-8">
+                <div className="lg:col-span-2 space-y-5 sm:space-y-6">
                   <div className="flex justify-between items-end">
                     <div>
-                      <p className="text-zinc-400 text-sm mb-1 uppercase tracking-wider font-semibold">Tension du Marché (Global)</p>
-                      <div className="flex items-baseline gap-2 sm:gap-3">
-                        <h2 className="text-4xl sm:text-5xl font-bold font-mono tracking-tighter">
+                      <p className="text-zinc-500 text-xs uppercase tracking-wider font-semibold">Tension du Marché (Global)</p>
+                      <div className="flex items-baseline gap-2">
+                        <h2 className="text-3xl sm:text-5xl font-bold font-mono tracking-tighter">
                           ${market.price.toFixed(2)}
                         </h2>
-                        <span className={`flex items-center font-mono text-base sm:text-lg ${isPositiveTrend ? 'text-emerald-400' : 'text-rose-400'}`}>
-                          {isPositiveTrend ? <TrendingUp className="w-4 h-4 sm:w-5 sm:h-5 mr-1" /> : <TrendingDown className="w-4 h-4 sm:w-5 sm:h-5 mr-1" />}
+                        <span className={`flex items-center font-mono text-sm sm:text-lg ${isPositiveTrend ? 'text-emerald-400' : 'text-rose-400'}`}>
+                          {isPositiveTrend ? <TrendingUp className="w-3.5 h-3.5 sm:w-5 sm:h-5 mr-1" /> : <TrendingDown className="w-3.5 h-3.5 sm:w-5 sm:h-5 mr-1" />}
                           {Math.abs(percentChange).toFixed(2)}%
                         </span>
                       </div>
                     </div>
                   </div>
 
-                  <div className="h-64 lg:h-96 w-full bg-[#121214] border border-zinc-800 rounded-2xl p-4 shadow-2xl relative">
+                  <div className="h-60 sm:h-80 lg:h-96 w-full bg-[#121214] border border-zinc-800 rounded-2xl p-4 shadow-2xl relative">
                     <SparklineChart 
                       data={market.history} 
                       isPositive={isPositiveTrend} 
@@ -631,45 +715,45 @@
                     <div className="absolute inset-0 pointer-events-none opacity-[0.03]" style={{ backgroundImage: 'linear-gradient(to right, #fff 1px, transparent 1px), linear-gradient(to bottom, #fff 1px, transparent 1px)', backgroundSize: '40px 40px' }}></div>
                   </div>
 
-                  <div className={`p-4 rounded-xl border flex items-start gap-4 transition-colors duration-500 ${
+                  <div className={`p-4 rounded-xl border flex items-start gap-3 sm:gap-4 transition-colors duration-500 ${
                     market.newsType === 'positive' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-200' : 
                     market.newsType === 'negative' ? 'bg-rose-500/10 border-rose-500/20 text-rose-200' : 
                     'bg-zinc-800/50 border-zinc-700/50 text-zinc-300'
                   }`}>
-                    <Zap className={`w-6 h-6 shrink-0 mt-0.5 ${market.newsType === 'positive' ? 'text-emerald-400' : market.newsType === 'negative' ? 'text-rose-400' : 'text-zinc-400'}`} />
+                    <Zap className={`w-5 h-5 shrink-0 mt-0.5 ${market.newsType === 'positive' ? 'text-emerald-400' : market.newsType === 'negative' ? 'text-rose-400' : 'text-zinc-400'}`} />
                     <div>
-                      <p className="text-xs uppercase font-bold opacity-70 mb-1">Dernière Actualité</p>
-                      <p className="text-lg font-medium leading-snug">{market.news}</p>
+                      <p className="text-[10px] uppercase font-bold opacity-70 mb-0.5">Dernière Actualité</p>
+                      <p className="text-sm sm:text-base font-medium leading-snug">{market.news}</p>
                     </div>
                   </div>
                 </div>
 
                 <div className="space-y-6">
-                  <div className="bg-[#121214] border border-zinc-800 rounded-2xl p-6 shadow-xl">
-                    <h3 className="text-lg font-semibold mb-6 flex items-center gap-2 border-b border-zinc-800 pb-4">
-                      <DollarSign className="w-5 h-5 text-emerald-500" /> Vos Fonds
+                  <div className="bg-[#121214] border border-zinc-800 rounded-2xl p-4 sm:p-6 shadow-xl">
+                    <h3 className="text-md sm:text-lg font-semibold mb-4 sm:text-left text-center flex items-center justify-center sm:justify-start gap-2 border-b border-zinc-800 pb-3">
+                      <DollarSign className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-500" /> Vos Fonds
                     </h3>
                     
-                    <div className="space-y-4 mb-6">
+                    <div className="space-y-3 mb-5">
                       <div className="flex justify-between items-center bg-zinc-900/50 p-3 rounded-lg border border-zinc-800/50">
-                        <span className="text-zinc-400">Liquidités</span>
-                        <span className="font-mono text-xl">{portfolio.balance.toLocaleString('fr-FR', { style: 'currency', currency: 'USD' })}</span>
+                        <span className="text-xs sm:text-sm text-zinc-400">Liquidités</span>
+                        <span className="font-mono text-sm sm:text-lg font-bold">{portfolio.balance.toLocaleString('fr-FR', { style: 'currency', currency: 'USD' })}</span>
                       </div>
                       <div className="flex justify-between items-center bg-zinc-900/50 p-3 rounded-lg border border-zinc-800/50">
-                        <span className="text-zinc-400">Actions possedées</span>
-                        <span className="font-mono text-xl font-bold text-blue-400">{portfolio.shares} <span className="text-sm font-normal text-zinc-600">unités</span></span>
+                        <span className="text-xs sm:text-sm text-zinc-400">Actions possedées</span>
+                        <span className="font-mono text-sm sm:text-lg font-bold text-blue-400">{portfolio.shares} <span className="text-xs font-normal text-zinc-500">unités</span></span>
                       </div>
                       {portfolio.shares > 0 && (
                         <>
                           <div className="flex justify-between items-center bg-zinc-900/50 p-3 rounded-lg border border-zinc-800/50">
-                            <span className="text-zinc-400">Prix d'achat moyen</span>
-                            <span className="font-mono text-lg text-zinc-300">${(portfolio.averageBuyPrice || 0).toFixed(2)}</span>
+                            <span className="text-xs sm:text-sm text-zinc-400">Prix d'achat moyen (TTC)</span>
+                            <span className="font-mono text-xs sm:text-sm text-zinc-300">${(portfolio.averageBuyPrice || 0).toFixed(2)}</span>
                           </div>
                           <div className="flex justify-between items-center bg-zinc-900/50 p-3 rounded-lg border border-zinc-800/50">
-                            <span className="text-zinc-400">Gains / Pertes</span>
-                            <span className={`font-mono text-lg ${market.price >= portfolio.averageBuyPrice ? 'text-emerald-400' : 'text-rose-400'}`}>
+                            <span className="text-xs sm:text-sm text-zinc-400">Gains / Pertes</span>
+                            <span className={`font-mono text-xs sm:text-sm ${market.price >= portfolio.averageBuyPrice ? 'text-emerald-400' : 'text-rose-400'}`}>
                               {market.price >= portfolio.averageBuyPrice ? '+' : ''}{((market.price - portfolio.averageBuyPrice) * portfolio.shares).toFixed(2)}$
-                              <span className="text-sm ml-1 opacity-80">
+                              <span className="text-[10px] ml-1 opacity-80">
                                 ({market.price >= portfolio.averageBuyPrice ? '+' : ''}{portfolio.averageBuyPrice > 0 ? (((market.price - portfolio.averageBuyPrice) / portfolio.averageBuyPrice) * 100).toFixed(2) : "0.00"}%)
                               </span>
                             </span>
@@ -678,83 +762,177 @@
                       )}
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-2 gap-3 sm:gap-4">
                       <button
                         onClick={() => handleTrade('BUY')}
-                        disabled={portfolio.balance < market.price}
-                        className="relative overflow-hidden group bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-xl py-4 font-bold text-lg transition-all active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed"
+                        disabled={portfolio.balance < (market.price * 1.01)}
+                        className="relative overflow-hidden group bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-xl py-3 font-bold text-sm sm:text-base transition-all active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed flex flex-col items-center justify-center min-h-[50px]"
                       >
                         <div className="absolute inset-0 bg-gradient-to-t from-emerald-500/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
                         ACHETER
+                        <span className="text-[9px] font-normal opacity-70">Frais: 1%</span>
                       </button>
                       
                       <button
                         onClick={() => handleTrade('SELL')}
                         disabled={portfolio.shares <= 0}
-                        className="relative overflow-hidden group bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-xl py-4 font-bold text-lg transition-all active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed"
+                        className="relative overflow-hidden group bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-xl py-3 font-bold text-sm sm:text-base transition-all active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed flex flex-col items-center justify-center min-h-[50px]"
                       >
                         <div className="absolute inset-0 bg-gradient-to-t from-rose-500/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
                         VENDRE
+                        <span className="text-[9px] font-normal opacity-70">Frais: 1%</span>
                       </button>
                     </div>
 
-                    <p className="text-xs text-zinc-600 mt-6 text-center flex items-center justify-center gap-1">
-                      <AlertCircle className="w-3 h-3 shrink-0" /> Vos actions influencent le cours global.
+                    <p className="text-[10px] text-zinc-600 mt-5 text-center flex items-center justify-center gap-1">
+                      <AlertCircle className="w-3.5 h-3.5 shrink-0" /> Vos actions influencent légèrement le cours.
                     </p>
                   </div>
                 </div>
               </div>
             )}
 
-            {/* ONGLET 2 : RÉCOMPENSES */}
+            {/* --- NOUVEAU: ONGLET BONUS & RÉCOMPENSES OPTIMISÉ & RETENTION ACCRUE --- */}
             {activeTab === 'rewards' && (
-              <div className="max-w-2xl mx-auto mt-10">
-                <div className="bg-[#121214] border border-indigo-500/30 rounded-3xl p-8 shadow-[0_0_40px_rgba(99,102,241,0.1)] text-center relative overflow-hidden">
-                  <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-indigo-500 via-purple-500 to-indigo-500"></div>
+              <div className="max-w-4xl mx-auto space-y-6">
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   
-                  <Gift className="w-20 h-20 text-indigo-400 mx-auto mb-6 drop-shadow-[0_0_15px_rgba(99,102,241,0.5)]" />
-                  
-                  <h2 className="text-3xl font-bold mb-2">Salaire Journalier</h2>
-                  <p className="text-zinc-400 mb-8 max-w-md mx-auto">
-                    Récupère tes liquidités quotidiennes pour réinvestir sur le marché. Ne manque pas une journée !
-                  </p>
+                  {/* MODULE A: SALAIRE JOURNALIER & STREAK */}
+                  <div className="bg-[#121214] border border-indigo-500/20 rounded-2xl p-5 sm:p-6 relative overflow-hidden flex flex-col justify-between">
+                    <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-indigo-500 to-purple-500"></div>
+                    
+                    <div>
+                      <div className="flex items-center justify-between mb-4">
+                        <h3 className="text-lg font-bold flex items-center gap-2 text-indigo-400">
+                          <Gift className="w-5 h-5" /> Salaire Journalier
+                        </h3>
+                        <div className="flex items-center gap-1 bg-amber-500/10 text-amber-400 px-2 py-0.5 rounded-full border border-amber-500/20 text-xs font-semibold">
+                          <Flame className="w-3.5 h-3.5 fill-amber-500" /> Série: {portfolio.streak || 1} {portfolio.streak > 1 ? 'jours' : 'jour'}
+                        </div>
+                      </div>
 
-                  <div className="bg-zinc-900/50 rounded-2xl p-6 border border-zinc-800/80 mb-8 w-full sm:w-auto sm:min-w-[250px] inline-block">
-                    <p className="text-sm font-semibold text-zinc-400 mb-2 uppercase tracking-wider">Statut</p>
-                    {timeToReward === 0 ? (
-                      <p className="text-3xl sm:text-4xl font-mono font-bold text-indigo-400">+${REWARD_AMOUNT}</p>
-                    ) : (
-                      <p className="text-2xl sm:text-3xl font-mono font-medium text-zinc-300">{formatTime(timeToReward)}</p>
-                    )}
+                      <p className="text-xs sm:text-sm text-zinc-400 mb-4">
+                        Revenez chaque jour pour augmenter votre multiplicateur de salaire ! À 7 jours consécutifs, vous gagnez un bonus permanent de <strong>+70%</strong>.
+                      </p>
+
+                      {/* Échelles de la série de jours */}
+                      <div className="grid grid-cols-7 gap-1 sm:gap-2 mb-6 text-center">
+                        {[1, 2, 3, 4, 5, 6, 7].map((day) => {
+                          const isCompleted = day <= (portfolio.streak || 1);
+                          return (
+                            <div key={day} className="flex flex-col items-center">
+                              <span className="text-[8px] sm:text-[10px] text-zinc-500 block mb-1">J{day}</span>
+                              <div className={`w-full aspect-square rounded-lg flex items-center justify-center font-mono text-xs font-bold border transition-all ${
+                                isCompleted 
+                                ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500' 
+                                : 'bg-zinc-900 text-zinc-600 border-zinc-800'
+                              }`}>
+                                +{day === 1 ? '0' : (day - 1) * 10}%
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div className="space-y-4">
+                      <div className="bg-zinc-950 p-3 sm:p-4 rounded-xl border border-zinc-800/60 flex items-center justify-between">
+                        <div>
+                          <span className="text-[10px] uppercase font-bold text-zinc-500 block">Salaire calculé</span>
+                          <span className="font-mono text-lg font-bold text-white">
+                            +${Math.round(REWARD_AMOUNT * (1 + ((portfolio.streak || 1) - 1) * 0.10))}
+                          </span>
+                        </div>
+                        <div className="text-right">
+                          <span className="text-[10px] uppercase font-bold text-zinc-500 block">Statut</span>
+                          {timeToReward === 0 ? (
+                            <span className="text-xs text-emerald-400 font-semibold flex items-center gap-1 justify-end"><span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-ping"></span> Prêt</span>
+                          ) : (
+                            <span className="text-xs text-zinc-400 font-mono">{formatTime(timeToReward)}</span>
+                          )}
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={handleClaimReward}
+                        disabled={timeToReward > 0}
+                        className={`w-full py-3.5 rounded-xl font-bold text-sm sm:text-base transition-all ${
+                          timeToReward === 0 
+                          ? 'bg-indigo-500 hover:bg-indigo-600 text-white shadow-lg active:scale-95 cursor-pointer' 
+                          : 'bg-zinc-900 text-zinc-500 border border-zinc-800 cursor-not-allowed'
+                        }`}
+                      >
+                        {timeToReward === 0 ? 'Réclamer mon salaire' : 'Compte à rebours activé'}
+                      </button>
+                    </div>
                   </div>
 
-                  <div>
-                    <button
-                      onClick={handleClaimReward}
-                      disabled={timeToReward > 0}
-                      className={`px-8 py-4 w-full sm:w-auto rounded-xl text-lg font-bold transition-all ${
-                        timeToReward === 0 
-                        ? 'bg-indigo-500 hover:bg-indigo-600 text-white shadow-[0_0_25px_rgba(99,102,241,0.5)] cursor-pointer active:scale-95' 
-                        : 'bg-zinc-800 text-zinc-600 cursor-not-allowed'
-                      }`}
-                    >
-                      {timeToReward === 0 ? 'Encaisser mon salaire' : 'Reviens plus tard'}
-                    </button>
+                  {/* MODULE B: MINAGE / STAKING D'INTÉRÊTS ACTIFS */}
+                  <div className="bg-[#121214] border border-emerald-500/20 rounded-2xl p-5 sm:p-6 relative overflow-hidden flex flex-col justify-between">
+                    <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-500 to-teal-500"></div>
+                    
+                    <div>
+                      <div className="flex items-center justify-between mb-4">
+                        <h3 className="text-lg font-bold flex items-center gap-2 text-emerald-400">
+                          <Coins className="w-5 h-5 animate-bounce" /> Générateur d'Intérêts
+                        </h3>
+                        <span className="text-[10px] bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded-full border border-emerald-500/20 font-bold">
+                          ACTIF EN DIRECT
+                        </span>
+                      </div>
+
+                      <p className="text-xs sm:text-sm text-zinc-400 mb-6">
+                        Tant que cette page reste ouverte sur votre écran, vous générez passivement des liquidités à hauteur de <strong>$0.05 par seconde</strong>. Récoltez régulièrement vos gains avant que le réservoir ne soit plein !
+                      </p>
+
+                      {/* Réservoir graphique */}
+                      <div className="bg-zinc-950 p-4 rounded-xl border border-zinc-800 flex items-center justify-between gap-4 mb-6">
+                        <div className="w-full bg-zinc-900 rounded-full h-4 overflow-hidden relative border border-zinc-800">
+                          <div 
+                            className="bg-gradient-to-r from-emerald-500 to-teal-400 h-full transition-all duration-1000 ease-out" 
+                            style={{ width: `${(stakingEarnings / MAX_STAKING_RESERVOIR) * 100}%` }}
+                          />
+                          <span className="absolute inset-0 flex items-center justify-center text-[10px] font-bold font-mono text-zinc-300">
+                            {((stakingEarnings / MAX_STAKING_RESERVOIR) * 100).toFixed(0)}% rempli
+                          </span>
+                        </div>
+                        <span className="font-mono text-xl font-extrabold text-emerald-400 w-24 text-right">
+                          ${stakingEarnings.toFixed(2)}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="space-y-3">
+                      <p className="text-[10px] text-zinc-500 text-center">
+                        Capacité maximale du réservoir : <strong>${MAX_STAKING_RESERVOIR.toFixed(2)}</strong>
+                      </p>
+                      
+                      <button
+                        onClick={handleClaimStaking}
+                        disabled={stakingEarnings <= 0}
+                        className={`w-full py-3.5 rounded-xl font-bold text-sm sm:text-base transition-all ${
+                          stakingEarnings > 0 
+                          ? 'bg-emerald-500 hover:bg-emerald-600 text-black shadow-lg active:scale-95 cursor-pointer' 
+                          : 'bg-zinc-900 text-zinc-500 border border-zinc-800 cursor-not-allowed'
+                        }`}
+                      >
+                        {stakingEarnings > 0 ? 'Récolter les gains accumulés' : 'Aucun gain disponible'}
+                      </button>
+                    </div>
                   </div>
+
                 </div>
               </div>
             )}
 
-            {/* ONGLET 3 : CLASSEMENT (LEADERBOARD) */}
             {activeTab === 'leaderboard' && (
               <div className="max-w-2xl mx-auto mt-4">
-                
-                {/* 1. Demande de pseudo si pas défini */}
                 {!portfolio?.pseudo ? (
-                  <div className="bg-[#121214] border border-zinc-800 rounded-2xl p-8 shadow-xl text-center">
-                    <Trophy className="w-16 h-16 text-amber-500 mx-auto mb-6" />
+                  <div className="bg-[#121214] border border-zinc-800 rounded-2xl p-6 sm:p-8 shadow-xl text-center">
+                    <Trophy className="w-16 h-16 text-amber-500 mx-auto mb-5" />
                     <h3 className="text-2xl font-bold mb-3">Rejoindre le Classement</h3>
-                    <p className="text-zinc-400 text-sm mb-8 max-w-md mx-auto">
+                    <p className="text-zinc-400 text-xs sm:text-sm mb-6 max-w-md mx-auto">
                       Pour apparaître dans le top des meilleurs traders mondiaux, choisis un pseudo unique. Ce choix est définitif.
                     </p>
                     
@@ -765,35 +943,33 @@
                         value={pseudoInput} 
                         onChange={e => setPseudoInput(e.target.value)} 
                         placeholder="Ton pseudo..." 
-                        className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 font-medium" 
+                        className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 font-medium" 
                       />
                       <button 
                         onClick={handleSetPseudo} 
                         disabled={!pseudoInput.trim()}
-                        className="bg-amber-500 hover:bg-amber-600 disabled:opacity-50 disabled:hover:bg-amber-500 text-black font-bold py-3 px-6 rounded-xl transition-colors whitespace-nowrap"
+                        className="bg-amber-500 hover:bg-amber-600 disabled:opacity-50 disabled:hover:bg-amber-500 text-black font-bold py-3 px-6 rounded-xl text-sm transition-colors whitespace-nowrap"
                       >
                         Valider
                       </button>
                     </div>
                   </div>
                 ) : (
-                  
-                  /* 2. Affichage du tableau des scores */
                   <div className="bg-[#121214] border border-zinc-800 rounded-2xl shadow-xl overflow-hidden">
                     <div className="p-4 sm:p-6 border-b border-zinc-800 flex justify-between items-center bg-zinc-900/30">
-                      <h3 className="text-lg sm:text-xl font-bold flex items-center gap-2 sm:gap-3">
+                      <h3 className="text-base sm:text-xl font-bold flex items-center gap-2">
                         <Trophy className="text-amber-500 w-5 h-5 sm:w-6 sm:h-6"/> 
                         Top 50 Mondial
                       </h3>
-                      <div className="text-right text-xs sm:text-sm">
-                        <p className="text-zinc-400">Ton pseudo</p>
+                      <div className="text-right text-xs">
+                        <p className="text-zinc-500">Pseudo</p>
                         <p className="font-bold text-amber-400 truncate max-w-[100px] sm:max-w-[150px]">{portfolio.pseudo}</p>
                       </div>
                     </div>
                     
-                    <div className="p-2">
+                    <div className="p-2 max-h-[60vh] overflow-y-auto">
                       {leaderboard.length === 0 ? (
-                        <p className="text-zinc-500 text-center py-10">Calcul des scores en cours...</p>
+                        <p className="text-zinc-500 text-center py-10 text-sm">Calcul des scores en cours...</p>
                       ) : (
                         <div className="space-y-1">
                           {leaderboard.map((player, index) => {
@@ -803,16 +979,16 @@
                             return (
                               <div key={index} className={`flex justify-between items-center p-3 sm:p-4 rounded-xl transition-colors ${isMe ? 'bg-amber-500/10 border border-amber-500/20' : 'hover:bg-zinc-900/50 border border-transparent'}`}>
                                 <div className="flex items-center gap-2 sm:gap-4 overflow-hidden">
-                                  <span className={`font-mono font-bold text-base sm:text-lg w-6 sm:w-8 shrink-0 text-center ${index === 0 ? 'text-amber-400' : index === 1 ? 'text-zinc-300' : index === 2 ? 'text-amber-700' : 'text-zinc-600'}`}>
+                                  <span className={`font-mono font-bold text-sm sm:text-base w-6 sm:w-8 shrink-0 text-center ${index === 0 ? 'text-amber-400' : index === 1 ? 'text-zinc-300' : index === 2 ? 'text-amber-700' : 'text-zinc-600'}`}>
                                     #{index + 1}
                                   </span>
-                                  <span className={`font-bold text-sm sm:text-base truncate ${isMe ? 'text-amber-400' : 'text-zinc-200'}`}>
+                                  <span className={`font-bold text-xs sm:text-sm truncate ${isMe ? 'text-amber-400' : 'text-zinc-200'}`}>
                                     {player.pseudo}
                                   </span>
                                 </div>
                                 <div className="text-right shrink-0 ml-2">
-                                  <p className="font-mono font-bold text-sm sm:text-base text-zinc-100">${player.totalValue.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</p>
-                                  <p className={`text-xs font-mono font-medium ${profit >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+                                  <p className="font-mono font-bold text-xs sm:text-sm text-zinc-100">${player.totalValue.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</p>
+                                  <p className={`text-[10px] sm:text-xs font-mono font-medium ${profit >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
                                     {profit >= 0 ? '+' : ''}{profit.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}$
                                   </p>
                                 </div>
@@ -829,34 +1005,77 @@
 
           </main>
 
-          {/* BARRE DE NAVIGATION INFÉRIEURE (MOBILE & DESKTOP) */}
-          <nav className="fixed bottom-0 w-full bg-[#09090b]/95 backdrop-blur-lg border-t border-zinc-800 z-50">
-            <div className="max-w-md mx-auto flex justify-between px-4 sm:px-8 py-3">
+          {/* FENÊTRE MODALE D'EXPLICATION (INFO) OPTIMISÉE POUR TÉLÉPHONNE */}
+          {showInfo && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm">
+              <div className="bg-[#121214] border border-zinc-700 rounded-2xl p-5 sm:p-6 max-w-lg w-full shadow-2xl relative max-h-[85vh] overflow-y-auto">
+                <button onClick={() => setShowInfo(false)} className="absolute top-4 right-4 text-zinc-400 hover:text-white transition-colors">
+                  <X className="w-5 h-5" />
+                </button>
+                <h2 className="text-xl sm:text-2xl font-bold mb-4 flex items-center gap-2 text-emerald-400">
+                  <Info className="w-5 h-5 sm:w-6 sm:h-6" /> Comment jouer ?
+                </h2>
+
+                <div className="space-y-4 text-zinc-300 text-xs sm:text-sm">
+                  <p>Bienvenue sur <strong>TRADEX.LIVE</strong>, un simulateur de bourse multijoueur synchrone en temps réel.</p>
+
+                  <div className="bg-zinc-900/50 p-3 sm:p-4 rounded-xl border border-zinc-800">
+                    <h3 className="font-bold text-white mb-1.5 flex items-center gap-2"><LineChart className="w-4 h-4 text-emerald-400"/> Bourse</h3>
+                    <ul className="list-disc pl-5 space-y-1 text-zinc-400">
+                      <li><strong>Liquidités :</strong> Votre solde disponible en USD pour effectuer vos investissements.</li>
+                      <li><strong>Actions :</strong> Nombre total de parts du marché global que vous possédez actuellement.</li>
+                      <li><strong>Achat / Vente :</strong> Vous pouvez acheter des parts ou les revendre. Une taxe incontournable de <strong>1% de frais</strong> s'applique à chaque transaction.</li>
+                      <li><strong>Ligne d'achat :</strong> Sur le graphique, la ligne en pointillés gris localise exactement votre prix moyen d'achat pour simplifier vos analyses.</li>
+                    </ul>
+                  </div>
+
+                  <div className="bg-zinc-900/50 p-3 sm:p-4 rounded-xl border border-zinc-800">
+                    <h3 className="font-bold text-white mb-1.5 flex items-center gap-2"><Gift className="w-4 h-4 text-indigo-400"/> Bonus (Rétention & Salaire)</h3>
+                    <ul className="list-disc pl-5 space-y-1 text-zinc-400">
+                      <li><strong>Série de Jours :</strong> Obtenez de l'argent quotidiennement. Conserver votre série consécutive augmente vos bonus de récompense jusqu'à <strong>+70%</strong> le 7ème jour.</li>
+                      <li><strong>Générateur passif :</strong> Restez actif sur le site pour produire <strong>$0.05 par seconde</strong>. Récoltez votre butin avant d'atteindre le seuil maximal de <strong>$50.00</strong>.</li>
+                    </ul>
+                  </div>
+
+                  <div className="bg-zinc-900/50 p-3 sm:p-4 rounded-xl border border-zinc-800">
+                    <h3 className="font-bold text-white mb-1.5 flex items-center gap-2"><Trophy className="w-4 h-4 text-amber-500"/> Classement mondial</h3>
+                    <p className="text-zinc-400">
+                      Déterminez votre pseudonyme et comparez vos performances avec la communauté. Votre classement est basé sur votre <strong>Valeur Totale</strong> (Liquidités + Valeur estimée des actions).
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* BARRE DE NAVIGATION INFÉRIEURE MOBILE */}
+          <nav className="fixed bottom-0 left-0 right-0 bg-[#09090b]/95 backdrop-blur-lg border-t border-zinc-800 z-50">
+            <div className="max-w-md mx-auto flex justify-between px-6 py-3">
               <button 
                 onClick={() => setActiveTab('trade')} 
-                className={`flex flex-col items-center gap-1.5 transition-colors ${activeTab === 'trade' ? 'text-emerald-400' : 'text-zinc-500 hover:text-zinc-300'}`}
+                className={`flex flex-col items-center gap-1 transition-colors ${activeTab === 'trade' ? 'text-emerald-400' : 'text-zinc-500 hover:text-zinc-300'}`}
               >
-                <LineChart className="w-6 h-6" />
-                <span className="text-[10px] font-bold uppercase tracking-wider">Bourse</span>
+                <LineChart className="w-5.5 h-5.5" />
+                <span className="text-[9px] font-bold uppercase tracking-wider">Bourse</span>
               </button>
               
               <button 
                 onClick={() => setActiveTab('rewards')} 
-                className={`flex flex-col items-center gap-1.5 transition-colors relative ${activeTab === 'rewards' ? 'text-indigo-400' : 'text-zinc-500 hover:text-zinc-300'}`}
+                className={`flex flex-col items-center gap-1 transition-colors relative ${activeTab === 'rewards' ? 'text-indigo-400' : 'text-zinc-500 hover:text-zinc-300'}`}
               >
                 {timeToReward === 0 && (
-                  <span className="absolute top-0 right-1 w-2.5 h-2.5 bg-indigo-500 rounded-full border-2 border-[#09090b]"></span>
+                  <span className="absolute top-0.5 right-1 w-2 h-2 bg-indigo-500 rounded-full border-2 border-[#09090b]"></span>
                 )}
-                <Gift className="w-6 h-6" />
-                <span className="text-[10px] font-bold uppercase tracking-wider">Bonus</span>
+                <Gift className="w-5.5 h-5.5" />
+                <span className="text-[9px] font-bold uppercase tracking-wider">Bonus</span>
               </button>
               
               <button 
                 onClick={() => setActiveTab('leaderboard')} 
-                className={`flex flex-col items-center gap-1.5 transition-colors ${activeTab === 'leaderboard' ? 'text-amber-400' : 'text-zinc-500 hover:text-zinc-300'}`}
+                className={`flex flex-col items-center gap-1 transition-colors ${activeTab === 'leaderboard' ? 'text-amber-400' : 'text-zinc-500 hover:text-zinc-300'}`}
               >
-                <Trophy className="w-6 h-6" />
-                <span className="text-[10px] font-bold uppercase tracking-wider">Top 50</span>
+                <Trophy className="w-5.5 h-5.5" />
+                <span className="text-[9px] font-bold uppercase tracking-wider">Top 50</span>
               </button>
             </div>
           </nav>
@@ -865,7 +1084,6 @@
       );
     }
 
-    // --- RENDU SUR LA PAGE HTML ---
     const root = createRoot(document.getElementById('root'));
     root.render(<App />);
     </script>
