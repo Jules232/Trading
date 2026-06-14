@@ -72,7 +72,9 @@
       DollarSign, 
       Briefcase,
       Zap,
-      Globe
+      Globe,
+      Users, /* <-- NOUVEAU: Icone Joueurs en ligne */
+      Gift   /* <-- NOUVEAU: Icone Récompense */
     } from 'lucide-react';
 
     // --- INITIALISATION FIREBASE ---
@@ -81,6 +83,10 @@
     const auth = getAuth(app);
     const db = getFirestore(app);
     const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+    // --- PARAMÈTRES DU JEU ---
+    const REWARD_COOLDOWN = 24 * 60 * 60 * 1000; // 24 heures en millisecondes
+    const REWARD_AMOUNT = 500; // Montant du bonus journalier
 
     // --- ACTUALITÉS ALÉATOIRES ---
     const NEWS_EVENTS = [
@@ -235,6 +241,10 @@
       const [portfolio, setPortfolio] = useState(null);
       const [market, setMarket] = useState(null);
       const [isLoading, setIsLoading] = useState(true);
+      
+      // --- NOUVEAUX ÉTATS ---
+      const [onlineCount, setOnlineCount] = useState(1);
+      const [timeToReward, setTimeToReward] = useState(0);
 
       // Garder une référence temps réel du marché pour éviter de recréer l'intervalle de mise à jour
       const marketRefState = useRef(market);
@@ -268,6 +278,40 @@
         return () => unsubscribe();
       }, []);
 
+      // --- NOUVEAU: GESTION DE LA PRÉSENCE (JOUEURS EN LIGNE) ---
+      useEffect(() => {
+        if (!user) return;
+
+        // Met à jour la dernière activité de l'utilisateur
+        const updatePresence = async () => {
+          const presenceRef = doc(db, 'artifacts', appId, 'public', 'data', 'online_users', user.uid);
+          try {
+            await setDoc(presenceRef, { lastActive: Date.now() }, { merge: true });
+          } catch (error) {
+            console.error("Erreur présence:", error);
+          }
+        };
+
+        updatePresence();
+        const presenceInterval = setInterval(updatePresence, 15000); // Ping toutes les 15s
+
+        // Écoute tous les joueurs pour compter ceux actifs récemment (< 30 secondes)
+        const onlineUsersRef = collection(db, 'artifacts', appId, 'public', 'data', 'online_users');
+        const unsubPresence = onSnapshot(onlineUsersRef, (snapshot) => {
+          const now = Date.now();
+          let count = 0;
+          snapshot.forEach(doc => {
+            if (now - doc.data().lastActive < 30000) count++;
+          });
+          setOnlineCount(Math.max(1, count));
+        }, (error) => console.error("Erreur lecture présence:", error));
+
+        return () => {
+          clearInterval(presenceInterval);
+          unsubPresence();
+        };
+      }, [user]);
+
       // Chargement des données Firestore (Portfolio et Marché)
       useEffect(() => {
         if (!user) return;
@@ -300,7 +344,8 @@
             await setDoc(portfolioRef, {
               balance: 10000.00,
               shares: 0,
-              averageBuyPrice: 0
+              averageBuyPrice: 0,
+              lastRewardClaim: 0 // Initialisé à 0 pour avoir le bonus direct
             });
           }
         };
@@ -323,6 +368,25 @@
           unsubPortfolio();
         };
       }, [user]);
+
+      // --- NOUVEAU: COMPTE À REBOURS DU BONUS ---
+      useEffect(() => {
+        if (!portfolio) return;
+        
+        const updateTimer = () => {
+          if (!portfolio.lastRewardClaim) {
+            setTimeToReward(0);
+            return;
+          }
+          const remaining = REWARD_COOLDOWN - (Date.now() - portfolio.lastRewardClaim);
+          setTimeToReward(remaining > 0 ? remaining : 0);
+        };
+
+        updateTimer();
+        const timerInterval = setInterval(updateTimer, 1000);
+        return () => clearInterval(timerInterval);
+      }, [portfolio?.lastRewardClaim]);
+
 
       // Moteur de simulation (Market Maker Local) lié uniquement au cycle de vie de l'utilisateur
       useEffect(() => {
@@ -402,6 +466,21 @@
         return () => clearInterval(intervalId);
       }, [user?.uid]);
 
+      // --- NOUVEAU : Fonction pour récupérer le bonus ---
+      const handleClaimReward = async () => {
+        if (!user || !portfolio || timeToReward > 0) return;
+        
+        const portfolioRef = doc(db, 'artifacts', appId, 'users', user.uid, 'portfolio', 'state');
+        // Mise à jour optimiste locale
+        setPortfolio(prev => ({ ...prev, balance: prev.balance + REWARD_AMOUNT, lastRewardClaim: Date.now() }));
+        
+        // Mise à jour BDD (merge: true pour ne pas effacer les autres champs)
+        await setDoc(portfolioRef, { 
+          balance: portfolio.balance + REWARD_AMOUNT, 
+          lastRewardClaim: Date.now() 
+        }, { merge: true });
+      };
+
       // Actions de trading
       const handleTrade = async (type) => {
         if (!market || !portfolio || !user) return;
@@ -436,15 +515,31 @@
         }
 
         // Mise à jour locale
-        setPortfolio({ balance: newBalance, shares: newShares, averageBuyPrice: newAverageBuyPrice });
+        setPortfolio({ ...portfolio, balance: newBalance, shares: newShares, averageBuyPrice: newAverageBuyPrice });
 
-        // Mise à jour base de données
-        await setDoc(portfolioRef, { balance: newBalance, shares: newShares, averageBuyPrice: newAverageBuyPrice });
+        // Mise à jour base de données -> CORRECTION DE BUG: Ajout de { merge: true } pour ne pas effacer le "lastRewardClaim" !
+        await setDoc(portfolioRef, { 
+          balance: newBalance, 
+          shares: newShares, 
+          averageBuyPrice: newAverageBuyPrice 
+        }, { merge: true });
+
         await setDoc(marketRef, {
           trend: market.trend + impactOnTrend,
           lastUpdate: Date.now()
         }, { merge: true });
       };
+
+      // --- NOUVEAU: Formatage du temps pour le timer ---
+      const formatTime = (ms) => {
+        if (ms <= 0) return "Disponible !";
+        const totalSeconds = Math.floor(ms / 1000);
+        const h = Math.floor(totalSeconds / 3600);
+        const m = Math.floor((totalSeconds % 3600) / 60);
+        const s = totalSeconds % 60;
+        return `${h}h ${m}m ${s}s`;
+      };
+
 
       if (isLoading || !market) {
         return (
@@ -470,8 +565,19 @@
                 <h1 className="text-xl font-bold tracking-tight">TRADEX<span className="text-emerald-500">.LIVE</span></h1>
               </div>
               
-              <div className="flex gap-6 text-sm">
-                <div className="flex flex-col items-end">
+              <div className="flex gap-6 text-sm items-center">
+                
+                {/* NOUVEAU: Compteur de Joueurs en Ligne */}
+                <div className="flex items-center gap-2 bg-zinc-900/80 px-3 py-1.5 rounded-full border border-zinc-800" title="Traders en ligne">
+                  <span className="relative flex h-2.5 w-2.5">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                  </span>
+                  <Users className="w-4 h-4 text-zinc-400" />
+                  <span className="font-mono font-medium text-zinc-300">{onlineCount}</span>
+                </div>
+
+                <div className="flex flex-col items-end border-l border-zinc-800 pl-6">
                   <span className="text-zinc-500 flex items-center gap-1"><Briefcase className="w-4 h-4"/> Portefeuille</span>
                   <span className="font-mono text-lg font-medium">{totalValue.toLocaleString('fr-FR', { style: 'currency', currency: 'USD' })}</span>
                 </div>
@@ -526,7 +632,7 @@
                   <DollarSign className="w-5 h-5 text-emerald-500" /> Vos Fonds
                 </h3>
                 
-                <div className="space-y-4 mb-8">
+                <div className="space-y-4 mb-6">
                   <div className="flex justify-between items-center bg-zinc-900/50 p-3 rounded-lg border border-zinc-800/50">
                     <span className="text-zinc-400">Liquidités</span>
                     <span className="font-mono text-xl">{portfolio.balance.toLocaleString('fr-FR', { style: 'currency', currency: 'USD' })}</span>
@@ -554,6 +660,32 @@
                   )}
                 </div>
 
+                {/* NOUVEAU: Encadré pour le bonus journalier */}
+                <div className="mb-6 p-4 bg-zinc-900/40 border border-indigo-500/20 rounded-xl flex flex-col xl:flex-row items-center justify-between gap-4">
+                  <div className="flex items-center gap-3 w-full">
+                    <div className={`p-2 rounded-lg shrink-0 transition-colors ${timeToReward === 0 ? 'bg-indigo-500/20 text-indigo-400' : 'bg-zinc-800 text-zinc-500'}`}>
+                       <Gift className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-zinc-200">Salaire Journalier</p>
+                      <p className="text-xs text-zinc-500 font-mono mt-0.5">
+                        {timeToReward === 0 ? `+${REWARD_AMOUNT}$ disponibles` : formatTime(timeToReward)}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={handleClaimReward}
+                    disabled={timeToReward > 0}
+                    className={`px-4 py-2 w-full xl:w-auto rounded-lg text-sm font-bold transition-all shrink-0 ${
+                      timeToReward === 0 
+                      ? 'bg-indigo-500 hover:bg-indigo-600 text-white shadow-[0_0_15px_rgba(99,102,241,0.4)] cursor-pointer active:scale-95' 
+                      : 'bg-zinc-800 text-zinc-600 cursor-not-allowed opacity-50'
+                    }`}
+                  >
+                    {timeToReward === 0 ? 'Encaisser' : 'Patienter'}
+                  </button>
+                </div>
+
                 <div className="grid grid-cols-2 gap-4">
                   <button
                     onClick={() => handleTrade('BUY')}
@@ -575,7 +707,7 @@
                 </div>
 
                 <p className="text-xs text-zinc-600 mt-6 text-center flex items-center justify-center gap-1">
-                  <AlertCircle className="w-3 h-3" /> Vos actions influencent le cours global en temps réel.
+                  <AlertCircle className="w-3 h-3 shrink-0" /> Vos actions influencent le cours global en temps réel.
                 </p>
               </div>
 
