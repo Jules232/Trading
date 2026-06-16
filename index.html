@@ -62,7 +62,8 @@
       setDoc, 
       getDoc, 
       onSnapshot,
-      collection
+      collection,
+      deleteField
     } from 'firebase/firestore';
     import { 
       TrendingUp, 
@@ -80,7 +81,9 @@
       Info,
       X,
       Flame,
-      Coins
+      Coins,
+      Dices,
+      HelpCircle
     } from 'lucide-react';
 
     // --- INITIALISATION FIREBASE ---
@@ -96,8 +99,80 @@
     const MAX_STAKING_RESERVOIR = 50.00; // Intérêt passif cumulable max
     const STAKING_RATE = 0.05; // $ accumulés par seconde
 
-    // --- ACTUALITÉS ALÉATOIRES (ENRICHIES) ---
+    // --- CONFIGURATION DES 3 MARCHÉS (NOMS CACHÉS) ---
+    const MARKETS_CONFIG = {
+      'm_slow': { id: 'm_slow', name: 'SafeBuild', basePrice: 50, vol: 0.6, tickRate: 3 }, // Lent
+      'm_medium': { id: 'm_medium', name: 'Tradex', basePrice: 100, vol: 2.5, tickRate: 1 }, // Moyen
+      'm_fast': { id: 'm_fast', name: 'QuantumX', basePrice: 15, vol: 6.0, tickRate: 0 } // Rapide
+    };
+    const MARKET_IDS = Object.keys(MARKETS_CONFIG);
+
+    // --- SYNTHÉTISEUR AUDIO WEB AUDIO API (AUTO-CONTENU) ---
+    let globalAudioCtx = null;
+    const playSound = (type) => {
+      try {
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContext) return;
+        
+        if (!globalAudioCtx) {
+          globalAudioCtx = new AudioContext();
+        }
+        if (globalAudioCtx.state === 'suspended') {
+          globalAudioCtx.resume();
+        }
+        
+        const ctx = globalAudioCtx;
+        const now = ctx.currentTime;
+
+        if (type === 'claim' || type === 'win') {
+          // Son de récompense joyeux (Arpège ascendant rapide)
+          const notes = type === 'claim' ? [587.33, 880] : [523.25, 659.25, 783.99, 1046.50];
+          notes.forEach((freq, i) => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(freq, now + i * 0.08);
+            gain.gain.setValueAtTime(0.12, now + i * 0.08);
+            gain.gain.exponentialRampToValueAtTime(0.01, now + i * 0.08 + 0.25);
+            osc.start(now + i * 0.08);
+            osc.stop(now + i * 0.08 + 0.3);
+          });
+        } else if (type === 'lose') {
+          // Son de défaite (Baisse de fréquence un peu triste)
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.type = 'sawtooth';
+          osc.frequency.setValueAtTime(220, now);
+          osc.frequency.linearRampToValueAtTime(110, now + 0.45);
+          gain.gain.setValueAtTime(0.12, now);
+          gain.gain.exponentialRampToValueAtTime(0.01, now + 0.45);
+          osc.start(now);
+          osc.stop(now + 0.5);
+        } else if (type === 'tick') {
+          // Son mécanique de rotation roulette
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.type = 'triangle';
+          osc.frequency.setValueAtTime(800, now);
+          gain.gain.setValueAtTime(0.05, now);
+          gain.gain.exponentialRampToValueAtTime(0.01, now + 0.04);
+          osc.start(now);
+          osc.stop(now + 0.05);
+        }
+      } catch (e) {
+        console.warn("Audio Context bloqué ou non pris en charge par le navigateur :", e);
+      }
+    };
+
+    // --- ACTUALITÉS ALÉATOIRES (ENRICHIES + GRISES) ---
     const NEWS_EVENTS = [
+      // Actualités classiques
       { text: "Elon Musk tweete un mème sur l'entreprise.", impact: 15 },
       { text: "Faille de sécurité majeure découverte dans le système.", impact: -20 },
       { text: "Nouveau partenariat stratégique avec un géant de la tech.", impact: 12 },
@@ -108,25 +183,14 @@
       { text: "Un concurrent lance un produit nettement supérieur.", impact: -12 },
       { text: "L'entreprise achète pour 1 milliard de Bitcoin.", impact: 8 },
       { text: "Enquête du régulateur financier ouverte aujourd'hui.", impact: -18 },
-      { text: "La FED annonce une hausse surprise des taux d'intérêt.", impact: -18 },
-      { text: "L'inflation ralentit enfin, les investisseurs respirent.", impact: 14 },
-      { text: "Grosse panne des serveurs cloud affectant les opérations.", impact: -15 },
-      { text: "Découverte majeure dans l'intelligence artificielle.", impact: 20 },
-      { text: "Un pays clé interdit les transactions liées au projet.", impact: -22 },
-      { text: "Rachat surprise par un conglomérat asiatique.", impact: 25 },
-      { text: "Fuite de données affectant 5 millions d'utilisateurs.", impact: -20 },
-      { text: "Nouveaux subsides gouvernementaux pour le secteur.", impact: 10 },
-      { text: "Pénurie mondiale de composants critiques.", impact: -14 },
-      { text: "Un influenceur financier très suivi recommande l'action.", impact: 12 },
-      { text: "Scandale de fraude fiscale touchant les dirigeants.", impact: -30 },
-      { text: "Lancement d'un produit révolutionnaire très attendu.", impact: 18 },
-      { text: "Grève générale des employés pour de meilleures conditions.", impact: -10 },
-      { text: "Rumeur de fusion avec le principal concurrent.", impact: 15 },
-      { text: "Les résultats trimestriels sont pires que prévus.", impact: -16 },
-      { text: "Une baleine a liquidé 10% de toutes les parts du marché.", impact: -25 },
-      { text: "Mise à jour majeure du réseau déployée sans accroc.", impact: 12 },
-      { text: "Un hedge fund célèbre annonce parier à la baisse (short).", impact: -15 },
-      { text: "Adoption de la technologie par une institution majeure.", impact: 30 }
+      
+      // Nouvelles Actualités Grises (Mystères)
+      { text: "Le gouvernement annonce une nouvelle loi de régulation sur le secteur.", impact: -15, isGrey: true },
+      { text: "Changement inattendu à la direction financière ce matin.", impact: -12, isGrey: true },
+      { text: "Une rumeur d'acquisition circule activement sur les réseaux sociaux.", impact: 20, isGrey: true },
+      { text: "Publication imminente du rapport trimestriel très attendu.", impact: 10, isGrey: true },
+      { text: "Mouvement suspect de fonds détecté sur les comptes de l'entreprise.", impact: -20, isGrey: true },
+      { text: "Un tweet mystérieux du PDG fait le buzz mondial.", impact: 15, isGrey: true }
     ];
 
     // --- COMPOSANT GRAPHIQUE SVG SUR MESURE ---
@@ -144,9 +208,7 @@
           }
         };
         
-        // Timeout pour éviter un calcul à 0 lors d'un chargement asynchrone ou d'un changement d'onglet
         const timer = setTimeout(updateSize, 100);
-
         window.addEventListener('resize', updateSize);
         updateSize();
         return () => {
@@ -268,7 +330,8 @@
     function App() {
       const [user, setUser] = useState(null);
       const [portfolio, setPortfolio] = useState(null);
-      const [market, setMarket] = useState(null);
+      const [markets, setMarkets] = useState({});
+      const [activeMarketId, setActiveMarketId] = useState('m_medium');
       const [isLoading, setIsLoading] = useState(true);
       
       const [onlineCount, setOnlineCount] = useState(1);
@@ -279,13 +342,21 @@
       const [pseudoInput, setPseudoInput] = useState('');
       const [showInfo, setShowInfo] = useState(false);
 
-      // --- NOUVEAU: ÉTAT D'ACCUMULATION D'INTÉRÊTS ACTIFS ---
+      // --- ÉTAT D'ACCUMULATION D'INTÉRÊTS ACTIFS ---
       const [stakingEarnings, setStakingEarnings] = useState(0);
 
-      const marketRefState = useRef(market);
+      // --- ÉTATS DU MINI-JEU DE CASINO (ROULETTE) ---
+      const [rouletteBet, setRouletteBet] = useState(100);
+      const [rouletteColor, setRouletteColor] = useState('red');
+      const [isSpinning, setIsSpinning] = useState(false);
+      const [rouletteWinnerNum, setRouletteWinnerNum] = useState(null);
+      const [rouletteWinnerColor, setRouletteWinnerColor] = useState(null);
+      const [rouletteStatusMessage, setRouletteStatusMessage] = useState("Faites vos jeux !");
+
+      const marketsRefState = useRef(markets);
       useEffect(() => {
-        marketRefState.current = market;
-      }, [market]);
+        marketsRefState.current = markets;
+      }, [markets]);
 
       useEffect(() => {
         const initAuth = async () => {
@@ -340,73 +411,106 @@
         };
       }, [user]);
 
+      // Initialisation de Firebase (Portfolio + 3 Marchés)
       useEffect(() => {
         if (!user) return;
 
-        const marketRef = doc(db, 'artifacts', appId, 'public', 'data', 'market', 'global');
         const portfolioRef = doc(db, 'artifacts', appId, 'users', user.uid, 'portfolio', 'state');
 
-        const initMarket = async () => {
-          const snap = await getDoc(marketRef);
-          if (!snap.exists()) {
-            await setDoc(marketRef, {
-              price: 100.00,
-              history: Array(40).fill(100.00),
-              trend: 0,
-              news: "Lancement du marché Tradex.",
-              newsType: 'neutral',
-              lastUpdate: Date.now(),
-              leaderId: user.uid,
-              leaderHeartbeat: Date.now()
-            });
+        // Init et écoute des marchés
+        const initMarkets = async () => {
+          for (const mId of MARKET_IDS) {
+            const mRef = doc(db, 'artifacts', appId, 'public', 'data', 'markets', mId);
+            const snap = await getDoc(mRef);
+            if (!snap.exists()) {
+              await setDoc(mRef, {
+                price: MARKETS_CONFIG[mId].basePrice,
+                history: Array(40).fill(MARKETS_CONFIG[mId].basePrice),
+                trend: 0,
+                sentimentScore: 0, // NOUVEAU: Score de sentiment des joueurs
+                news: `Ouverture du marché ${MARKETS_CONFIG[mId].name}.`,
+                newsType: 'neutral',
+                lastUpdate: Date.now(),
+                leaderId: user.uid,
+                leaderHeartbeat: Date.now()
+              });
+            }
           }
         };
-        initMarket();
+        initMarkets();
+
+        const unsubscribers = [];
+        for (const mId of MARKET_IDS) {
+          const mRef = doc(db, 'artifacts', appId, 'public', 'data', 'markets', mId);
+          const unsub = onSnapshot(mRef, (docSnap) => {
+            if (docSnap.exists()) {
+              setMarkets(prev => ({ ...prev, [mId]: docSnap.data() }));
+            }
+          }, (error) => console.error(`Erreur market ${mId}:`, error));
+          unsubscribers.push(unsub);
+        }
 
         const initPortfolio = async () => {
           const snap = await getDoc(portfolioRef);
           if (!snap.exists()) {
             await setDoc(portfolioRef, {
               balance: 10000.00,
-              shares: 0,
-              averageBuyPrice: 0,
+              assets: {
+                'm_slow': { shares: 0, averageBuyPrice: 0 },
+                'm_medium': { shares: 0, averageBuyPrice: 0 },
+                'm_fast': { shares: 0, averageBuyPrice: 0 }
+              },
               lastRewardClaim: 0,
               pseudo: "",
-              streak: 1, // Nouvelle valeur de streak par défaut
-              lastRewardDate: "" // Pour vérifier si réclamé le lendemain
+              streak: 1
             });
           }
         };
         initPortfolio();
 
-        const unsubMarket = onSnapshot(marketRef, (docSnap) => {
-          if (docSnap.exists()) setMarket(docSnap.data());
-        }, (error) => console.error("Erreur market:", error));
-
         const unsubPortfolio = onSnapshot(portfolioRef, (docSnap) => {
           if (docSnap.exists()) {
-            setPortfolio(docSnap.data());
+            const data = docSnap.data();
+            // Rétrocompatibilité (Migration des anciens comptes vers m_medium)
+            if (!data.assets) {
+              data.assets = {
+                'm_slow': { shares: 0, averageBuyPrice: 0 },
+                'm_medium': { shares: data.shares || 0, averageBuyPrice: data.averageBuyPrice || 0 },
+                'm_fast': { shares: 0, averageBuyPrice: 0 }
+              };
+            }
+            setPortfolio(data);
             setIsLoading(false);
           }
         }, (error) => console.error("Erreur portfolio:", error));
 
         return () => {
-          unsubMarket();
+          unsubscribers.forEach(unsub => unsub());
           unsubPortfolio();
         };
       }, [user]);
 
-      // Calcul des scores en temps réel pour le Leaderboard public
+      // Calcul Valeur Totale pour Leaderboard
+      const totalValueComputed = useMemo(() => {
+        if (!portfolio || !portfolio.assets) return 0;
+        let totalSharesValue = 0;
+        for (const mId of MARKET_IDS) {
+          if (portfolio.assets[mId] && markets[mId]) {
+            totalSharesValue += portfolio.assets[mId].shares * markets[mId].price;
+          }
+        }
+        return portfolio.balance + totalSharesValue;
+      }, [portfolio, markets]);
+
       useEffect(() => {
-        if (!user || !portfolio || !market || !portfolio.pseudo) return;
-        const totalValue = portfolio.balance + (portfolio.shares * market.price);
+        if (!user || !portfolio?.pseudo || Object.keys(markets).length < 3) return;
         const lbRef = doc(db, 'artifacts', appId, 'public', 'data', 'leaderboard', user.uid);
         setDoc(lbRef, {
           pseudo: portfolio.pseudo,
-          totalValue: totalValue,
+          totalValue: totalValueComputed,
           lastUpdated: Date.now()
         }, { merge: true }).catch(e => console.error("Erreur maj score:", e));
-      }, [user, portfolio?.balance, portfolio?.shares, portfolio?.pseudo, market?.price]);
+      }, [user, portfolio?.pseudo, totalValueComputed, markets]);
 
       useEffect(() => {
         if (!user) return;
@@ -436,7 +540,7 @@
         return () => clearInterval(timerInterval);
       }, [portfolio?.lastRewardClaim]);
 
-      // --- NOUVEAU: COMPTEUR DE MINAGE/STAKING PASSIF EN TEMPS RÉEL (Si actif sur l'onglet) ---
+      // COMPTEUR DE MINAGE/STAKING PASSIF EN TEMPS RÉEL
       useEffect(() => {
         if (!user || isLoading) return;
         const interval = setInterval(() => {
@@ -448,73 +552,90 @@
         return () => clearInterval(interval);
       }, [user, isLoading]);
 
-      // Moteur de simulation (Market Maker Local)
+      // Moteur de simulation (Market Maker Local pour les 3 marchés)
       useEffect(() => {
         if (!user) return;
 
         const intervalId = setInterval(async () => {
-          const currentMarket = marketRefState.current;
-          if (!currentMarket) return;
-
-          const marketRef = doc(db, 'artifacts', appId, 'public', 'data', 'market', 'global');
           const now = Date.now();
           
-          const isLeader = currentMarket.leaderId === user.uid;
-          const leaderIsDead = (now - (currentMarket.leaderHeartbeat || 0)) > 5000;
+          for (const mId of MARKET_IDS) {
+            const currentMarket = marketsRefState.current[mId];
+            if (!currentMarket) continue;
 
-          if (leaderIsDead && !isLeader) {
-            await setDoc(marketRef, { leaderId: user.uid, leaderHeartbeat: now }, { merge: true });
-            return; 
+            const isLeader = currentMarket.leaderId === user.uid;
+            const leaderIsDead = (now - (currentMarket.leaderHeartbeat || 0)) > 5000;
+            const mRef = doc(db, 'artifacts', appId, 'public', 'data', 'markets', mId);
+
+            if (leaderIsDead && !isLeader) {
+              await setDoc(mRef, { leaderId: user.uid, leaderHeartbeat: now }, { merge: true });
+              continue; 
+            }
+
+            if (isLeader) {
+              const config = MARKETS_CONFIG[mId];
+              const timeSinceLastUpdate = now - currentMarket.lastUpdate;
+              // Conversion du tickRate (0 = ~500ms, 1 = ~1000ms, 3 = ~2000ms)
+              const targetDelay = config.tickRate === 0 ? 400 : (config.tickRate === 1 ? 900 : 1900);
+
+              // Le sentiment diminue (revient vers 0) progressivement au fil du temps
+              let newSentiment = (currentMarket.sentimentScore || 0) * 0.85; 
+              if (Math.abs(newSentiment) < 0.1) newSentiment = 0;
+
+              if (timeSinceLastUpdate > targetDelay) {
+                let newTrend = currentMarket.trend * 0.92;
+                let currentNews = currentMarket.news;
+                let currentNewsType = currentMarket.newsType;
+
+                newTrend += (Math.random() - 0.5) * config.vol;
+
+                if (Math.random() < 0.05) {
+                  const event = NEWS_EVENTS[Math.floor(Math.random() * NEWS_EVENTS.length)];
+                  newTrend += event.impact; // Applique l'impact (même s'il est gris)
+                  currentNews = event.text;
+                  currentNewsType = event.isGrey ? 'grey' : (event.impact > 0 ? 'positive' : 'negative');
+                }
+
+                let newPrice = currentMarket.price + newTrend;
+                
+                if (newPrice <= 1.5) {
+                  newPrice = 1.5;
+                  newTrend = Math.abs(newTrend) + 1.0;
+                }
+
+                const newHistory = [...currentMarket.history, newPrice];
+                if (newHistory.length > 50) newHistory.shift();
+
+                try {
+                  await setDoc(mRef, {
+                    price: newPrice,
+                    history: newHistory,
+                    trend: newTrend,
+                    sentimentScore: newSentiment,
+                    news: currentNews,
+                    newsType: currentNewsType,
+                    lastUpdate: now,
+                    leaderHeartbeat: now
+                  }, { merge: true });
+                } catch (e) {}
+              } else {
+                if (now - (currentMarket.leaderHeartbeat || 0) > 3000) {
+                  try { 
+                    await setDoc(mRef, { 
+                      leaderHeartbeat: now,
+                      sentimentScore: newSentiment // On met aussi à jour le sentiment même si pas de nouveau tick de prix
+                    }, { merge: true }); 
+                  } catch (e) {}
+                }
+              }
+            }
           }
-
-          if (isLeader && (now - currentMarket.lastUpdate > 1500)) {
-            let newTrend = currentMarket.trend * 0.92;
-            let currentNews = currentMarket.news;
-            let currentNewsType = currentMarket.newsType;
-
-            newTrend += (Math.random() - 0.5) * 2.5;
-
-            if (Math.random() < 0.05) {
-              const event = NEWS_EVENTS[Math.floor(Math.random() * NEWS_EVENTS.length)];
-              newTrend += event.impact;
-              currentNews = event.text;
-              currentNewsType = event.impact > 0 ? 'positive' : 'negative';
-            }
-
-            let newPrice = currentMarket.price + newTrend;
-            
-            if (newPrice <= 1.5) {
-              newPrice = 1.5;
-              newTrend = Math.abs(newTrend) + 1.0;
-            }
-
-            const newHistory = [...currentMarket.history, newPrice];
-            if (newHistory.length > 50) newHistory.shift();
-
-            try {
-              await setDoc(marketRef, {
-                price: newPrice,
-                history: newHistory,
-                trend: newTrend,
-                news: currentNews,
-                newsType: currentNewsType,
-                lastUpdate: now,
-                leaderHeartbeat: now
-              }, { merge: true });
-            } catch (e) {}
-          } else if (isLeader) {
-            if (now - (currentMarket.leaderHeartbeat || 0) > 3000) {
-              try {
-                await setDoc(marketRef, { leaderHeartbeat: now }, { merge: true });
-              } catch (e) {}
-            }
-          }
-        }, 1000);
+        }, 500); // Boucle générale toutes les 500ms
 
         return () => clearInterval(intervalId);
       }, [user?.uid]);
 
-      // --- NOUVEAU: COLLECTE DE SALAIRE ET GESTION DE STREAK SUR FIREBASE ---
+      // COLLECTE DE SALAIRE ET GESTION DE STREAK SUR FIREBASE
       const handleClaimReward = async () => {
         if (!user || !portfolio || timeToReward > 0) return;
         const portfolioRef = doc(db, 'artifacts', appId, 'users', user.uid, 'portfolio', 'state');
@@ -528,19 +649,18 @@
         if (lastClaim > 0) {
           const delay = now - lastClaim;
           if (delay < oneDayMs * 2) {
-            // Moins de 48 heures se sont écoulées : on incrémente la série (max 7)
             newStreak = Math.min(newStreak + 1, 7);
           } else {
-            // Plus de 48h, le joueur a brisé sa série quotidienne
             newStreak = 1;
           }
         } else {
           newStreak = 1;
         }
 
-        // Multiplicateur : +10% par jour de série (Jour 1 = 1.0, Jour 7 = 1.7x)
         const multiplier = 1 + (newStreak - 1) * 0.10;
         const finalSalary = Math.round(REWARD_AMOUNT * multiplier);
+
+        playSound('claim');
 
         setPortfolio(prev => ({ 
           ...prev, 
@@ -556,13 +676,15 @@
         }, { merge: true });
       };
 
-      // --- NOUVEAU: RÉCOLTE DU MINAGE PASSIF ---
+      // RÉCOLTE DU MINAGE PASSIF
       const handleClaimStaking = async () => {
         if (!user || !portfolio || stakingEarnings <= 0) return;
         const portfolioRef = doc(db, 'artifacts', appId, 'users', user.uid, 'portfolio', 'state');
 
         const collectedAmount = stakingEarnings;
-        setStakingEarnings(0); // Réinitialisation immédiate locale
+        setStakingEarnings(0); 
+
+        playSound('claim');
 
         setPortfolio(prev => ({
           ...prev,
@@ -574,48 +696,153 @@
         }, { merge: true });
       };
 
-      const handleTrade = async (type) => {
-        if (!market || !portfolio || !user) return;
+      // --- LOGIQUE DE JEU DE LA ROULETTE DU CASINO ---
+      const handleSpinRoulette = async () => {
+        if (isSpinning || !user || !portfolio) return;
+        if (rouletteBet <= 0 || rouletteBet > portfolio.balance) {
+          setRouletteStatusMessage("Mise invalide ou solde insuffisant !");
+          playSound('lose');
+          return;
+        }
 
-        const marketRef = doc(db, 'artifacts', appId, 'public', 'data', 'market', 'global');
+        setIsSpinning(true);
+        setRouletteWinnerNum(null);
+        setRouletteWinnerColor(null);
+        setRouletteStatusMessage("Roue en rotation...");
+
+        let ticksCount = 0;
+        const interval = setInterval(() => {
+          playSound('tick');
+          ticksCount++;
+          if (ticksCount >= 12) {
+            clearInterval(interval);
+          }
+        }, 120);
+
+        setTimeout(async () => {
+          const winningNumber = Math.floor(Math.random() * 37);
+          let winningColor = 'red';
+          
+          if (winningNumber === 0) {
+            winningColor = 'green';
+          } else if (
+            [2, 4, 6, 8, 10, 11, 13, 15, 17, 20, 22, 24, 26, 28, 29, 31, 33, 35].includes(winningNumber)
+          ) {
+            winningColor = 'black';
+          }
+
+          setRouletteWinnerNum(winningNumber);
+          setRouletteWinnerColor(winningColor);
+
+          const portfolioRef = doc(db, 'artifacts', appId, 'users', user.uid, 'portfolio', 'state');
+          let winMultiplier = 0;
+          let won = false;
+
+          if (rouletteColor === winningColor) {
+            won = true;
+            winMultiplier = winningColor === 'green' ? 35 : 2;
+          }
+
+          let newBalance = portfolio.balance;
+          if (won) {
+            const earnings = rouletteBet * (winMultiplier - 1);
+            newBalance += earnings;
+            setRouletteStatusMessage(`Gagné ! Le numéro ${winningNumber} (${winningColor.toUpperCase()}) est sorti. +$${earnings.toFixed(2)}`);
+            playSound('win');
+          } else {
+            newBalance -= rouletteBet;
+            setRouletteStatusMessage(`Perdu ! Le numéro ${winningNumber} (${winningColor.toUpperCase()}) est sorti. -$${rouletteBet.toFixed(2)}`);
+            playSound('lose');
+          }
+
+          setPortfolio(prev => ({ ...prev, balance: newBalance }));
+          await setDoc(portfolioRef, { balance: newBalance }, { merge: true });
+          setIsSpinning(false);
+        }, 1600);
+      };
+
+      // TRADING D'ACTIONS (Frais 1% et pertes brutes x2)
+      const handleTrade = async (type) => {
+        const mId = activeMarketId;
+        const currentMarket = markets[mId];
+        
+        if (!currentMarket || !portfolio || !user) return;
+
+        const mRef = doc(db, 'artifacts', appId, 'public', 'data', 'markets', mId);
         const portfolioRef = doc(db, 'artifacts', appId, 'users', user.uid, 'portfolio', 'state');
 
-        const currentPrice = market.price;
+        const currentPrice = currentMarket.price;
         let newBalance = portfolio.balance;
-        let newShares = portfolio.shares;
-        let newAverageBuyPrice = portfolio.averageBuyPrice || 0;
+        
+        const activeAssets = portfolio.assets?.[mId] || { shares: 0, averageBuyPrice: 0 };
+        let newShares = activeAssets.shares;
+        let newAverageBuyPrice = activeAssets.averageBuyPrice;
+        
         let impactOnTrend = 0;
 
-        const feeRate = 0.01;
+        // --- DIFFICULTÉ : Frais remis à 1% ---
+        const feeRate = 0.01; 
 
         if (type === 'BUY') {
           const cost = currentPrice * (1 + feeRate);
           if (portfolio.balance >= cost) {
-            newAverageBuyPrice = ((portfolio.shares * newAverageBuyPrice) + cost) / (portfolio.shares + 1);
+            newAverageBuyPrice = ((newShares * newAverageBuyPrice) + cost) / (newShares + 1);
             newBalance -= cost;
             newShares += 1;
-            impactOnTrend = 0.5; 
-          } else return;
+            impactOnTrend = 0.5 * (MARKETS_CONFIG[mId].vol / 2.5); 
+            playSound('claim');
+          } else {
+            playSound('lose');
+            return;
+          }
         } else if (type === 'SELL') {
-          if (portfolio.shares > 0) {
+          if (newShares > 0) {
             const gain = currentPrice * (1 - feeRate);
-            newBalance += gain;
+            
+            // --- DIFFICULTÉ ACCRUE : Pertes brutes multipliées par 2 (CONSERVÉ) ---
+            let penaltyLoss = 0;
+            if (currentPrice < newAverageBuyPrice) {
+              const rawLoss = newAverageBuyPrice - currentPrice;
+              penaltyLoss = rawLoss; 
+            }
+
+            newBalance += (gain - penaltyLoss);
             newShares -= 1;
-            impactOnTrend = -0.5; 
-            if (newShares === 0) newAverageBuyPrice = 0;
-          } else return;
+            impactOnTrend = -0.5 * (MARKETS_CONFIG[mId].vol / 2.5); 
+            
+            if (newShares === 0) {
+              newAverageBuyPrice = 0;
+            }
+
+            if (penaltyLoss > 0) {
+              playSound('lose'); 
+            } else {
+              playSound('win'); 
+            }
+          } else {
+            playSound('lose');
+            return;
+          }
         }
 
-        setPortfolio({ ...portfolio, balance: newBalance, shares: newShares, averageBuyPrice: newAverageBuyPrice });
+        const newAssets = {
+          ...portfolio.assets,
+          [mId]: { shares: newShares, averageBuyPrice: newAverageBuyPrice }
+        };
+
+        setPortfolio({ ...portfolio, balance: newBalance, assets: newAssets });
 
         await setDoc(portfolioRef, { 
           balance: newBalance, 
-          shares: newShares, 
-          averageBuyPrice: newAverageBuyPrice 
+          assets: newAssets 
         }, { merge: true });
 
-        await setDoc(marketRef, {
-          trend: market.trend + impactOnTrend,
+        // Mise à jour du marché avec l'impact ET le signal de Sentiment
+        const sentimentImpact = type === 'BUY' ? 3 : -3; // Impact fort pour se voir sur le front
+
+        await setDoc(mRef, {
+          trend: currentMarket.trend + impactOnTrend,
+          sentimentScore: (currentMarket.sentimentScore || 0) + sentimentImpact,
           lastUpdate: Date.now()
         }, { merge: true });
       };
@@ -635,19 +862,33 @@
         return `${h}h ${m}m ${s}s`;
       };
 
-      if (isLoading || !market) {
+      if (isLoading || Object.keys(markets).length < 3) {
         return (
           <div className="min-h-screen bg-[#09090b] flex items-center justify-center text-emerald-500 font-mono">
-            <Activity className="animate-spin w-8 h-8 mr-3" /> Initialisation du Terminal...
+            <Activity className="animate-spin w-8 h-8 mr-3" /> Chargement des Marchés...
           </div>
         );
       }
 
-      const isPositiveTrend = market.history[market.history.length - 1] >= market.history[market.history.length - 2];
-      const priceDiff = market.price - market.history[0];
-      const percentChange = (priceDiff / market.history[0]) * 100;
+      const activeMarket = markets[activeMarketId];
+      const activeAssets = portfolio.assets?.[activeMarketId] || { shares: 0, averageBuyPrice: 0 };
       
-      const totalValue = portfolio.balance + (portfolio.shares * market.price);
+      const isPositiveTrend = activeMarket.history[activeMarket.history.length - 1] >= activeMarket.history[activeMarket.history.length - 2];
+      const priceDiff = activeMarket.price - activeMarket.history[0];
+      const percentChange = (priceDiff / activeMarket.history[0]) * 100;
+
+      // NOUVEAU: Logique d'affichage du sentiment des joueurs
+      const sentiment = activeMarket.sentimentScore || 0;
+      let sentimentText = "Neutre";
+      let SentimentIcon = Activity;
+
+      if (sentiment > 0.5) {
+        sentimentText = "Achats majoritaires";
+        SentimentIcon = TrendingUp;
+      } else if (sentiment < -0.5) {
+        sentimentText = "Ventes majoritaires";
+        SentimentIcon = TrendingDown;
+      }
 
       return (
         <div className="min-h-screen bg-[#09090b] text-zinc-100 font-sans selection:bg-emerald-500/30 pb-28">
@@ -669,9 +910,9 @@
                   <span className="font-mono text-xs sm:text-sm font-medium text-zinc-300">{onlineCount}</span>
                 </div>
 
-                <div className="flex flex-col items-end border-l border-zinc-800 pl-3 sm:pl-6 hidden xs:flex">
-                  <span className="text-[10px] sm:text-xs text-zinc-500 flex items-center gap-1"><Briefcase className="w-3.5 h-3.5"/> Portefeuille</span>
-                  <span className="font-mono text-sm sm:text-base font-medium">{totalValue.toLocaleString('fr-FR', { style: 'currency', currency: 'USD' })}</span>
+                <div className="hidden sm:flex flex-col items-end border-l border-zinc-800 pl-3 sm:pl-6">
+                  <span className="text-[10px] sm:text-xs text-zinc-500 flex items-center gap-1"><Briefcase className="w-3.5 h-3.5"/> Portefeuille Global</span>
+                  <span className="font-mono text-sm sm:text-base font-medium">{totalValueComputed.toLocaleString('fr-FR', { style: 'currency', currency: 'USD' })}</span>
                 </div>
 
                 <button 
@@ -689,13 +930,31 @@
             
             {activeTab === 'trade' && (
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 sm:gap-8">
-                <div className="lg:col-span-2 space-y-5 sm:space-y-6">
-                  <div className="flex justify-between items-end">
+                <div className="lg:col-span-2 space-y-4 sm:space-y-6">
+                  
+                  {/* SÉLECTEUR DES 3 MARCHÉS */}
+                  <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
+                    {MARKET_IDS.map(mId => (
+                      <button
+                        key={mId}
+                        onClick={() => setActiveMarketId(mId)}
+                        className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-bold whitespace-nowrap transition-all border ${
+                          activeMarketId === mId 
+                          ? 'bg-emerald-500 text-black border-emerald-400 shadow-lg shadow-emerald-500/20' 
+                          : 'bg-zinc-900/50 text-zinc-400 hover:bg-zinc-800 border-zinc-800'
+                        }`}
+                      >
+                        {MARKETS_CONFIG[mId].name}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="flex flex-wrap justify-between items-end gap-3">
                     <div>
-                      <p className="text-zinc-500 text-xs uppercase tracking-wider font-semibold">Tension du Marché (Global)</p>
+                      <p className="text-zinc-500 text-xs uppercase tracking-wider font-semibold">Tension du Marché ({MARKETS_CONFIG[activeMarketId].name})</p>
                       <div className="flex items-baseline gap-2">
                         <h2 className="text-3xl sm:text-5xl font-bold font-mono tracking-tighter">
-                          ${market.price.toFixed(2)}
+                          ${activeMarket.price.toFixed(2)}
                         </h2>
                         <span className={`flex items-center font-mono text-sm sm:text-lg ${isPositiveTrend ? 'text-emerald-400' : 'text-rose-400'}`}>
                           {isPositiveTrend ? <TrendingUp className="w-3.5 h-3.5 sm:w-5 sm:h-5 mr-1" /> : <TrendingDown className="w-3.5 h-3.5 sm:w-5 sm:h-5 mr-1" />}
@@ -703,27 +962,48 @@
                         </span>
                       </div>
                     </div>
+
+                    {/* NOUVEAU : PANNEAU SENTIMENT (ACTIVITÉ EN DIRECT DES JOUEURS) */}
+                    <div className={`flex flex-col items-center justify-center px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl border bg-[#121214] shadow-sm mb-1 transition-colors duration-500 ${
+                       sentiment > 0.5 ? 'border-emerald-500/30 text-emerald-400' :
+                       sentiment < -0.5 ? 'border-rose-500/30 text-rose-400' :
+                       'border-zinc-700/50 text-zinc-400'
+                    }`}>
+                       <p className="text-[8px] sm:text-[9px] uppercase font-bold tracking-widest text-zinc-500 mb-0.5">Activité des Joueurs</p>
+                       <div className="flex items-center gap-1.5 font-semibold text-xs sm:text-sm">
+                          <SentimentIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                          <span>{sentimentText}</span>
+                       </div>
+                    </div>
                   </div>
 
                   <div className="h-60 sm:h-80 lg:h-96 w-full bg-[#121214] border border-zinc-800 rounded-2xl p-4 shadow-2xl relative">
                     <SparklineChart 
-                      data={market.history} 
+                      data={activeMarket.history} 
                       isPositive={isPositiveTrend} 
-                      averageBuyPrice={portfolio?.averageBuyPrice}
-                      sharesCount={portfolio?.shares}
+                      averageBuyPrice={activeAssets.averageBuyPrice}
+                      sharesCount={activeAssets.shares}
                     />
                     <div className="absolute inset-0 pointer-events-none opacity-[0.03]" style={{ backgroundImage: 'linear-gradient(to right, #fff 1px, transparent 1px), linear-gradient(to bottom, #fff 1px, transparent 1px)', backgroundSize: '40px 40px' }}></div>
                   </div>
 
+                  {/* BOÎTE ACTUALITÉ (AVEC LA LOGIQUE GRISÉE) */}
                   <div className={`p-4 rounded-xl border flex items-start gap-3 sm:gap-4 transition-colors duration-500 ${
-                    market.newsType === 'positive' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-200' : 
-                    market.newsType === 'negative' ? 'bg-rose-500/10 border-rose-500/20 text-rose-200' : 
+                    activeMarket.newsType === 'positive' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-200' : 
+                    activeMarket.newsType === 'negative' ? 'bg-rose-500/10 border-rose-500/20 text-rose-200' : 
+                    activeMarket.newsType === 'grey' ? 'bg-zinc-400/10 border-zinc-500/30 text-zinc-300' : 
                     'bg-zinc-800/50 border-zinc-700/50 text-zinc-300'
                   }`}>
-                    <Zap className={`w-5 h-5 shrink-0 mt-0.5 ${market.newsType === 'positive' ? 'text-emerald-400' : market.newsType === 'negative' ? 'text-rose-400' : 'text-zinc-400'}`} />
+                    {activeMarket.newsType === 'grey' ? (
+                      <HelpCircle className="w-5 h-5 shrink-0 mt-0.5 text-zinc-400" />
+                    ) : (
+                      <Zap className={`w-5 h-5 shrink-0 mt-0.5 ${activeMarket.newsType === 'positive' ? 'text-emerald-400' : activeMarket.newsType === 'negative' ? 'text-rose-400' : 'text-zinc-400'}`} />
+                    )}
                     <div>
-                      <p className="text-[10px] uppercase font-bold opacity-70 mb-0.5">Dernière Actualité</p>
-                      <p className="text-sm sm:text-base font-medium leading-snug">{market.news}</p>
+                      <p className="text-[10px] uppercase font-bold opacity-70 mb-0.5">
+                        Dernière Actualité {activeMarket.newsType === 'grey' && "(Impact caché)"}
+                      </p>
+                      <p className="text-sm sm:text-base font-medium leading-snug">{activeMarket.news}</p>
                     </div>
                   </div>
                 </div>
@@ -731,33 +1011,39 @@
                 <div className="space-y-6">
                   <div className="bg-[#121214] border border-zinc-800 rounded-2xl p-4 sm:p-6 shadow-xl">
                     <h3 className="text-md sm:text-lg font-semibold mb-4 sm:text-left text-center flex items-center justify-center sm:justify-start gap-2 border-b border-zinc-800 pb-3">
-                      <DollarSign className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-500" /> Vos Fonds
+                      <DollarSign className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-500" /> Vos Fonds ({MARKETS_CONFIG[activeMarketId].name})
                     </h3>
                     
                     <div className="space-y-3 mb-5">
                       <div className="flex justify-between items-center bg-zinc-900/50 p-3 rounded-lg border border-zinc-800/50">
-                        <span className="text-xs sm:text-sm text-zinc-400">Liquidités</span>
+                        <span className="text-xs sm:text-sm text-zinc-400">Liquidités (Global)</span>
                         <span className="font-mono text-sm sm:text-lg font-bold">{portfolio.balance.toLocaleString('fr-FR', { style: 'currency', currency: 'USD' })}</span>
                       </div>
                       <div className="flex justify-between items-center bg-zinc-900/50 p-3 rounded-lg border border-zinc-800/50">
-                        <span className="text-xs sm:text-sm text-zinc-400">Actions possedées</span>
-                        <span className="font-mono text-sm sm:text-lg font-bold text-blue-400">{portfolio.shares} <span className="text-xs font-normal text-zinc-500">unités</span></span>
+                        <span className="text-xs sm:text-sm text-zinc-400">Actions sur ce marché</span>
+                        <span className="font-mono text-sm sm:text-lg font-bold text-blue-400">{activeAssets.shares} <span className="text-xs font-normal text-zinc-500">unités</span></span>
                       </div>
-                      {portfolio.shares > 0 && (
+                      {activeAssets.shares > 0 && (
                         <>
                           <div className="flex justify-between items-center bg-zinc-900/50 p-3 rounded-lg border border-zinc-800/50">
                             <span className="text-xs sm:text-sm text-zinc-400">Prix d'achat moyen (TTC)</span>
-                            <span className="font-mono text-xs sm:text-sm text-zinc-300">${(portfolio.averageBuyPrice || 0).toFixed(2)}</span>
+                            <span className="font-mono text-xs sm:text-sm text-zinc-300">${(activeAssets.averageBuyPrice || 0).toFixed(2)}</span>
                           </div>
                           <div className="flex justify-between items-center bg-zinc-900/50 p-3 rounded-lg border border-zinc-800/50">
                             <span className="text-xs sm:text-sm text-zinc-400">Gains / Pertes</span>
-                            <span className={`font-mono text-xs sm:text-sm ${market.price >= portfolio.averageBuyPrice ? 'text-emerald-400' : 'text-rose-400'}`}>
-                              {market.price >= portfolio.averageBuyPrice ? '+' : ''}{((market.price - portfolio.averageBuyPrice) * portfolio.shares).toFixed(2)}$
+                            <span className={`font-mono text-xs sm:text-sm ${activeMarket.price >= activeAssets.averageBuyPrice ? 'text-emerald-400' : 'text-rose-400'}`}>
+                              {activeMarket.price >= activeAssets.averageBuyPrice ? '+' : ''}{((activeMarket.price - activeAssets.averageBuyPrice) * activeAssets.shares).toFixed(2)}$
                               <span className="text-[10px] ml-1 opacity-80">
-                                ({market.price >= portfolio.averageBuyPrice ? '+' : ''}{portfolio.averageBuyPrice > 0 ? (((market.price - portfolio.averageBuyPrice) / portfolio.averageBuyPrice) * 100).toFixed(2) : "0.00"}%)
+                                ({activeMarket.price >= activeAssets.averageBuyPrice ? '+' : ''}{activeAssets.averageBuyPrice > 0 ? (((activeMarket.price - activeAssets.averageBuyPrice) / activeAssets.averageBuyPrice) * 100).toFixed(2) : "0.00"}%)
                               </span>
                             </span>
                           </div>
+                          {activeMarket.price < activeAssets.averageBuyPrice && (
+                            <div className="p-2 bg-rose-500/10 border border-rose-500/20 rounded-lg text-rose-400 text-[10px] leading-tight flex items-center gap-1">
+                              <AlertCircle className="w-3 h-3 shrink-0" />
+                              Attention : Vente à perte ! Pertes nettes doublées (x2).
+                            </div>
+                          )}
                         </>
                       )}
                     </div>
@@ -765,7 +1051,7 @@
                     <div className="grid grid-cols-2 gap-3 sm:gap-4">
                       <button
                         onClick={() => handleTrade('BUY')}
-                        disabled={portfolio.balance < (market.price * 1.01)}
+                        disabled={portfolio.balance < (activeMarket.price * 1.01)}
                         className="relative overflow-hidden group bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-xl py-3 font-bold text-sm sm:text-base transition-all active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed flex flex-col items-center justify-center min-h-[50px]"
                       >
                         <div className="absolute inset-0 bg-gradient-to-t from-emerald-500/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
@@ -775,7 +1061,7 @@
                       
                       <button
                         onClick={() => handleTrade('SELL')}
-                        disabled={portfolio.shares <= 0}
+                        disabled={activeAssets.shares <= 0}
                         className="relative overflow-hidden group bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-xl py-3 font-bold text-sm sm:text-base transition-all active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed flex flex-col items-center justify-center min-h-[50px]"
                       >
                         <div className="absolute inset-0 bg-gradient-to-t from-rose-500/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
@@ -792,9 +1078,9 @@
               </div>
             )}
 
-            {/* --- NOUVEAU: ONGLET BONUS & RÉCOMPENSES OPTIMISÉ & RETENTION ACCRUE --- */}
+            {/* --- ONGLET BONUS, RÉCOMPENSES & MINI-CASINO --- */}
             {activeTab === 'rewards' && (
-              <div className="max-w-4xl mx-auto space-y-6">
+              <div className="max-w-4xl mx-auto space-y-8">
                 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   
@@ -923,6 +1209,180 @@
                   </div>
 
                 </div>
+
+                {/* --- MODULE NOUVEAU: MINI JEU CASINO (LA ROULETTE) --- */}
+                <div className="bg-[#121214] border border-amber-500/20 rounded-2xl p-5 sm:p-6 relative overflow-hidden">
+                  <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-amber-500 to-orange-500"></div>
+                  
+                  <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4 border-b border-zinc-800 pb-4">
+                    <div className="flex items-center gap-2">
+                      <Dices className="w-6 h-6 text-amber-400 animate-spin" style={{ animationDuration: '6s' }} />
+                      <div>
+                        <h3 className="text-lg font-bold text-amber-400">Mini-Casino : La Roulette</h3>
+                        <p className="text-xs text-zinc-400">Tentez de multiplier vos liquidités instantanément !</p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-xs text-zinc-500 block">Vos Liquidités</span>
+                      <span className="font-mono text-base font-bold text-emerald-400">${portfolio.balance.toLocaleString('fr-FR', { minimumFractionDigits: 2 })}</span>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                    {/* Zone de paris */}
+                    <div className="lg:col-span-7 space-y-4">
+                      {/* 1. Sélection du montant */}
+                      <div>
+                        <label className="text-xs text-zinc-400 uppercase font-semibold tracking-wider block mb-2">Choisir la mise ($)</label>
+                        <div className="grid grid-cols-5 gap-1 sm:gap-2">
+                          {[50, 100, 500, 1000].map((val) => (
+                            <button
+                              key={val}
+                              onClick={() => { playSound('tick'); setRouletteBet(val); }}
+                              disabled={isSpinning}
+                              className={`py-2 px-1 rounded-lg text-xs font-mono font-bold transition-all border ${
+                                rouletteBet === val 
+                                ? 'bg-amber-500/20 border-amber-500 text-amber-300' 
+                                : 'bg-zinc-900 hover:bg-zinc-800 border-zinc-800 text-zinc-400'
+                              }`}
+                            >
+                              ${val}
+                            </button>
+                          ))}
+                          <button
+                            onClick={() => { playSound('tick'); setRouletteBet(Math.floor(portfolio.balance)); }}
+                            disabled={isSpinning}
+                            className={`py-2 px-1 rounded-lg text-[10px] font-bold uppercase transition-all border ${
+                              rouletteBet === Math.floor(portfolio.balance)
+                              ? 'bg-amber-500/20 border-amber-500 text-amber-300' 
+                              : 'bg-zinc-900 hover:bg-zinc-800 border-zinc-800 text-zinc-400'
+                            }`}
+                          >
+                            All-in
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Input de mise manuelle */}
+                      <div className="flex items-center bg-zinc-950 px-3 py-1 rounded-xl border border-zinc-800">
+                        <span className="text-zinc-500 text-sm mr-2">$</span>
+                        <input
+                          type="number"
+                          disabled={isSpinning}
+                          value={rouletteBet}
+                          onChange={(e) => {
+                            const val = Math.max(0, parseInt(e.target.value) || 0);
+                            setRouletteBet(val);
+                          }}
+                          className="bg-transparent text-white font-mono font-bold text-sm focus:outline-none w-full"
+                          min="1"
+                        />
+                      </div>
+
+                      {/* 2. Sélection de la cible de pari */}
+                      <div>
+                        <label className="text-xs text-zinc-400 uppercase font-semibold tracking-wider block mb-2">Parier sur la couleur</label>
+                        <div className="grid grid-cols-3 gap-3">
+                          <button
+                            onClick={() => { playSound('tick'); setRouletteColor('red'); }}
+                            disabled={isSpinning}
+                            className={`py-3 rounded-xl font-bold text-xs flex flex-col items-center gap-1 border transition-all ${
+                              rouletteColor === 'red'
+                              ? 'bg-rose-600 text-white border-white scale-105 shadow-lg shadow-rose-900/30'
+                              : 'bg-[#1e1114] text-rose-400 border-rose-950 hover:bg-[#251418]'
+                            }`}
+                          >
+                            <span className="w-3 h-3 bg-rose-600 rounded-full border border-white"></span>
+                            Rouge (x2)
+                          </button>
+
+                          <button
+                            onClick={() => { playSound('tick'); setRouletteColor('black'); }}
+                            disabled={isSpinning}
+                            className={`py-3 rounded-xl font-bold text-xs flex flex-col items-center gap-1 border transition-all ${
+                              rouletteColor === 'black'
+                              ? 'bg-zinc-800 text-white border-white scale-105 shadow-lg shadow-black'
+                              : 'bg-[#111113] text-zinc-400 border-zinc-900 hover:bg-[#18181b]'
+                            }`}
+                          >
+                            <span className="w-3 h-3 bg-zinc-950 rounded-full border border-zinc-700"></span>
+                            Noir (x2)
+                          </button>
+
+                          <button
+                            onClick={() => { playSound('tick'); setRouletteColor('green'); }}
+                            disabled={isSpinning}
+                            className={`py-3 rounded-xl font-bold text-xs flex flex-col items-center gap-1 border transition-all ${
+                              rouletteColor === 'green'
+                              ? 'bg-emerald-600 text-white border-white scale-105 shadow-lg shadow-emerald-950/30'
+                              : 'bg-[#0f1915] text-emerald-400 border-emerald-950 hover:bg-[#13211b]'
+                            }`}
+                          >
+                            <span className="w-3 h-3 bg-emerald-600 rounded-full border border-white animate-pulse"></span>
+                            Vert / Le 0 (x35)
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Zone de tirage visuel */}
+                    <div className="lg:col-span-5 bg-zinc-950 rounded-xl p-4 flex flex-col justify-between items-center border border-zinc-800 relative">
+                      <div className="text-center w-full">
+                        <p className="text-[10px] uppercase font-extrabold tracking-widest text-zinc-500 mb-1">RÉSOLUTION ROULETTE</p>
+                        
+                        {/* Roue roulette simplifiée animée */}
+                        <div className="h-32 w-full flex items-center justify-center relative overflow-hidden bg-zinc-900 border border-zinc-800 rounded-lg my-3">
+                          {isSpinning ? (
+                            <div className="flex gap-1 animate-pulse">
+                              <span className="w-4 h-4 rounded-full bg-rose-500 animate-bounce" style={{ animationDelay: '0.1s' }}></span>
+                              <span className="w-4 h-4 rounded-full bg-zinc-100 animate-bounce" style={{ animationDelay: '0.2s' }}></span>
+                              <span className="w-4 h-4 rounded-full bg-emerald-500 animate-bounce" style={{ animationDelay: '0.3s' }}></span>
+                            </div>
+                          ) : rouletteWinnerNum !== null ? (
+                            <div className="flex flex-col items-center animate-scaleIn">
+                              <div className={`w-16 h-16 rounded-full flex items-center justify-center font-mono text-2xl font-black border-2 shadow-2xl ${
+                                rouletteWinnerColor === 'red' ? 'bg-rose-600 border-rose-400 shadow-rose-900/40 text-white' : 
+                                rouletteWinnerColor === 'black' ? 'bg-zinc-800 border-zinc-600 shadow-black text-white' : 
+                                'bg-emerald-600 border-emerald-400 shadow-emerald-900/40 text-white'
+                              }`}>
+                                {rouletteWinnerNum}
+                              </div>
+                              <span className="text-[10px] uppercase font-bold text-zinc-400 mt-2">
+                                Couleur : {rouletteWinnerColor === 'red' ? 'Rouge' : rouletteWinnerColor === 'black' ? 'Noir' : 'Vert (Zéro)'}
+                              </span>
+                            </div>
+                          ) : (
+                            <p className="text-xs text-zinc-500 font-mono italic">Prêt pour la rotation</p>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Message statut */}
+                      <div className="text-center mb-4">
+                        <p className={`text-xs font-semibold leading-relaxed px-2 py-1.5 rounded-lg ${
+                          rouletteStatusMessage.includes("Gagné") ? 'text-emerald-400 bg-emerald-500/10' :
+                          rouletteStatusMessage.includes("Perdu") ? 'text-rose-400 bg-rose-500/10' :
+                          'text-zinc-300'
+                        }`}>
+                          {rouletteStatusMessage}
+                        </p>
+                      </div>
+
+                      <button
+                        onClick={handleSpinRoulette}
+                        disabled={isSpinning || portfolio.balance < rouletteBet || rouletteBet <= 0}
+                        className={`w-full py-3.5 rounded-xl font-bold text-sm sm:text-base transition-all ${
+                          !isSpinning && portfolio.balance >= rouletteBet && rouletteBet > 0
+                          ? 'bg-amber-500 hover:bg-amber-600 text-black shadow-lg shadow-amber-950/20 active:scale-95 cursor-pointer' 
+                          : 'bg-zinc-900 text-zinc-500 border border-zinc-800 cursor-not-allowed'
+                        }`}
+                      >
+                        {isSpinning ? "Lancement..." : "Faire tourner la roue"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
               </div>
             )}
 
@@ -1020,12 +1480,21 @@
                   <p>Bienvenue sur <strong>TRADEX.LIVE</strong>, un simulateur de bourse multijoueur synchrone en temps réel.</p>
 
                   <div className="bg-zinc-900/50 p-3 sm:p-4 rounded-xl border border-zinc-800">
-                    <h3 className="font-bold text-white mb-1.5 flex items-center gap-2"><LineChart className="w-4 h-4 text-emerald-400"/> Bourse</h3>
+                    <h3 className="font-bold text-white mb-1.5 flex items-center gap-2"><LineChart className="w-4 h-4 text-emerald-400"/> Bourse & Difficulté Réaliste</h3>
                     <ul className="list-disc pl-5 space-y-1 text-zinc-400">
                       <li><strong>Liquidités :</strong> Votre solde disponible en USD pour effectuer vos investissements.</li>
-                      <li><strong>Actions :</strong> Nombre total de parts du marché global que vous possédez actuellement.</li>
-                      <li><strong>Achat / Vente :</strong> Vous pouvez acheter des parts ou les revendre. Une taxe incontournable de <strong>1% de frais</strong> s'applique à chaque transaction.</li>
-                      <li><strong>Ligne d'achat :</strong> Sur le graphique, la ligne en pointillés gris localise exactement votre prix moyen d'achat pour simplifier vos analyses.</li>
+                      <li><strong>Achat / Vente :</strong> Les frais de transaction sont de <strong>1%</strong>.</li>
+                      <li><strong>Pertes Asymétriques (x2) :</strong> Si vous revendez à perte sous votre prix moyen d'achat, vos pertes brutes sont multipliées par 2. Les gains sont normaux.</li>
+                      <li><strong>3 Marchés :</strong> Vous pouvez naviguer entre 3 marchés différents. Observez-les pour comprendre leur dynamique et diversifiez votre portefeuille !</li>
+                      <li><strong>Actualités mystères :</strong> Certaines actualités apparaissent en gris. À vous de deviner si la nouvelle est bonne ou mauvaise pour l'entreprise.</li>
+                    </ul>
+                  </div>
+
+                  <div className="bg-zinc-900/50 p-3 sm:p-4 rounded-xl border border-zinc-800">
+                    <h3 className="font-bold text-white mb-1.5 flex items-center gap-2"><Dices className="w-4 h-4 text-amber-400"/> Casino & Roulette</h3>
+                    <ul className="list-disc pl-5 space-y-1 text-zinc-400">
+                      <li><strong>Rouge / Noir :</strong> Double votre mise (2x).</li>
+                      <li><strong>Vert (0) :</strong> Multiplie par 35 votre mise (35x).</li>
                     </ul>
                   </div>
 
@@ -1040,7 +1509,7 @@
                   <div className="bg-zinc-900/50 p-3 sm:p-4 rounded-xl border border-zinc-800">
                     <h3 className="font-bold text-white mb-1.5 flex items-center gap-2"><Trophy className="w-4 h-4 text-amber-500"/> Classement mondial</h3>
                     <p className="text-zinc-400">
-                      Déterminez votre pseudonyme et comparez vos performances avec la communauté. Votre classement est basé sur votre <strong>Valeur Totale</strong> (Liquidités + Valeur estimée des actions).
+                      Déterminez votre pseudonyme et comparez vos performances avec la communauté. Votre classement est basé sur votre <strong>Valeur Totale</strong> (Liquidités + Valeur estimée des actions sur les 3 marchés).
                     </p>
                   </div>
                 </div>
@@ -1063,7 +1532,7 @@
                 onClick={() => setActiveTab('rewards')} 
                 className={`flex flex-col items-center gap-1 transition-colors relative ${activeTab === 'rewards' ? 'text-indigo-400' : 'text-zinc-500 hover:text-zinc-300'}`}
               >
-                {timeToReward === 0 && (
+                {(timeToReward === 0 || stakingEarnings > 0) && (
                   <span className="absolute top-0.5 right-1 w-2 h-2 bg-indigo-500 rounded-full border-2 border-[#09090b]"></span>
                 )}
                 <Gift className="w-5.5 h-5.5" />
