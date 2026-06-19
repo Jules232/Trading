@@ -59,7 +59,7 @@
       getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged 
     } from 'firebase/auth';
     import { 
-      getFirestore, doc, setDoc, getDoc, onSnapshot, collection, deleteField
+      getFirestore, doc, setDoc, getDoc, onSnapshot, collection, deleteField, deleteDoc
     } from 'firebase/firestore';
     import { 
       TrendingUp, TrendingDown, Activity, AlertCircle, DollarSign, Briefcase, Zap, Globe, 
@@ -317,6 +317,8 @@
       const [showAdminPrompt, setShowAdminPrompt] = useState(false);
       const [adminPwd, setAdminPwd] = useState('');
       const [confirmReset, setConfirmReset] = useState(false);
+      const [confirmDeleteProfile, setConfirmDeleteProfile] = useState(false);
+      const [confirmResetPlayerId, setConfirmResetPlayerId] = useState(null);
 
       const [stakingEarnings, setStakingEarnings] = useState(0);
 
@@ -1126,6 +1128,32 @@
         await setDoc(portfolioRef, { balance: newBalance, lastWeeklyClaim: currentWeekId, achievements: newAch }, { merge: true });
       };
 
+      const handleDeleteProfile = async () => {
+         if(!confirmDeleteProfile) {
+            setConfirmDeleteProfile(true);
+            setTimeout(() => setConfirmDeleteProfile(false), 4000);
+         } else {
+            const portfolioRef = doc(db, 'artifacts', appId, 'users', user.uid, 'portfolio', 'state');
+            const lbRef = doc(db, 'artifacts', appId, 'public', 'data', 'leaderboard', user.uid);
+            try {
+                await deleteDoc(lbRef);
+                await setDoc(portfolioRef, {
+                    balance: 10000.00,
+                    pseudo: "",
+                    assets: { 'm_slow': { shares: 0, averageBuyPrice: 0 }, 'm_medium': { shares: 0, averageBuyPrice: 0 }, 'm_fast': { shares: 0, averageBuyPrice: 0 }, 'm_longterm': { shares: 0, averageBuyPrice: 0 } },
+                    transactions: { 'm_slow': [], 'm_medium': [], 'm_fast': [] },
+                    stats: { totalProfit: 0, totalTrades: 0, winningTrades: 0, bestTrade: 0, worstTrade: 0, highestPortfolio: 10000, playTimeSeconds: 0 },
+                    achievements: []
+                }, { merge: true });
+                setConfirmDeleteProfile(false);
+                setActiveTab('trade');
+                addNotification("Profil supprimé avec succès.", "success");
+            } catch(e) {
+                addNotification("Erreur lors de la suppression.", "error");
+            }
+         }
+      };
+
       return (
         <div className="max-w-7xl mx-auto pb-28 font-sans px-4 sm:px-6 relative">
           
@@ -1701,6 +1729,16 @@
                            <Activity className="w-5 h-5 shrink-0"/> Statistiques Détaillées
                         </h3>
                         <StatsCard stats={portfolio?.stats} isCurrentUser={true} />
+                        
+                        <div className="mt-8 pt-6 border-t border-white/10 flex justify-center">
+                            <button 
+                                onClick={handleDeleteProfile}
+                                className={`text-[10px] sm:text-xs font-bold px-4 py-2 rounded-lg transition-colors border flex items-center gap-2 ${confirmDeleteProfile ? 'bg-rose-600 text-white border-rose-500 animate-pulse' : 'text-rose-500/80 hover:text-rose-400 bg-rose-500/10 hover:bg-rose-500/20 border-rose-500/20'}`}
+                            >
+                                <X className="w-3.5 h-3.5" /> 
+                                {confirmDeleteProfile ? "Confirmer la suppression (Irréversible)" : "Supprimer mon profil définitivement"}
+                            </button>
+                        </div>
                      </div>
                   </div>
                </div>
@@ -2017,6 +2055,35 @@
             </div>
           </nav>
 
+          {/* MODALE GAME OVER (Fonds Négatifs) */}
+          {portfolio && portfolio.balance < 0 && (
+             <div className="fixed inset-0 z-[300] bg-black/90 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in zoom-in duration-500">
+                <div className={`${theme.panel} border border-rose-500/50 p-6 sm:p-8 rounded-3xl max-w-md w-full relative shadow-[0_0_80px_rgba(244,63,94,0.4)] text-center`}>
+                   <div className="w-20 h-20 bg-rose-500/20 rounded-full flex items-center justify-center mx-auto mb-6 border border-rose-500/50">
+                      <AlertCircle className="w-10 h-10 text-rose-500 animate-pulse" />
+                   </div>
+                   <h2 className="text-3xl font-black text-white mb-2">GAME OVER</h2>
+                   <p className="text-sm text-zinc-400 mb-6">
+                      Votre solde est descendu en dessous de zéro (<span className="text-rose-400 font-bold font-mono">{portfolio.balance.toFixed(2)}$</span>). Vous êtes ruiné et la banque a saisi vos actifs restants pour rembourser vos dettes.
+                   </p>
+                   <button 
+                      onClick={async () => {
+                          const portfolioRef = doc(db, 'artifacts', appId, 'users', user.uid, 'portfolio', 'state');
+                          await setDoc(portfolioRef, {
+                              balance: 10000,
+                              assets: { 'm_slow': { shares: 0, averageBuyPrice: 0 }, 'm_medium': { shares: 0, averageBuyPrice: 0 }, 'm_fast': { shares: 0, averageBuyPrice: 0 }, 'm_longterm': { shares: 0, averageBuyPrice: 0 } },
+                              transactions: { 'm_slow': [], 'm_medium': [], 'm_fast': [] }
+                          }, { merge: true });
+                          playSound('claim');
+                      }}
+                      className="w-full bg-rose-600 hover:bg-rose-500 text-white font-bold py-3.5 rounded-xl transition-transform active:scale-95 shadow-lg shadow-rose-600/20"
+                   >
+                      Se déclarer en faillite (Repartir avec 10 000$)
+                   </button>
+                </div>
+             </div>
+          )}
+
           {/* MODALE DU PROFIL D'UN AUTRE JOUEUR (CLASSEMENT) ANTI-DÉBORDEMENT */}
           {selectedPlayer && (
              <div className="fixed inset-0 z-[200] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in zoom-in duration-300">
@@ -2035,6 +2102,29 @@
                    </div>
                    <div className="overflow-y-auto scrollbar-hide pb-2 flex-1">
                       <StatsCard stats={selectedPlayer.stats} isCurrentUser={false} />
+                      
+                      {isAdminMode && (
+                         <div className="mt-6 pt-4 border-t border-rose-500/30">
+                            <button 
+                               onClick={async () => {
+                                  if (confirmResetPlayerId !== selectedPlayer.id) {
+                                      setConfirmResetPlayerId(selectedPlayer.id);
+                                      setTimeout(() => setConfirmResetPlayerId(null), 3000);
+                                  } else {
+                                      const pRef = doc(db, 'artifacts', appId, 'users', selectedPlayer.id, 'portfolio', 'state');
+                                      await setDoc(pRef, { balance: 10000 }, { merge: true });
+                                      addNotification(`Argent de ${selectedPlayer.pseudo} réinitialisé.`, "success");
+                                      setConfirmResetPlayerId(null);
+                                      setSelectedPlayer(null);
+                                  }
+                               }}
+                               className={`w-full font-bold py-2.5 rounded-xl transition-colors text-sm flex justify-center items-center gap-2 ${confirmResetPlayerId === selectedPlayer.id ? 'bg-rose-600 text-white animate-pulse' : 'bg-rose-600/20 hover:bg-rose-600/40 text-rose-400 border border-rose-500/50'}`}
+                            >
+                               <Shield className="w-4 h-4"/> 
+                               {confirmResetPlayerId === selectedPlayer.id ? 'Confirmer (Recliquer)' : 'Admin : Remettre son argent à 10 000$'}
+                            </button>
+                         </div>
+                      )}
                    </div>
                 </div>
              </div>
