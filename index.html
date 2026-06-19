@@ -64,7 +64,7 @@
     import { 
       TrendingUp, TrendingDown, Activity, AlertCircle, DollarSign, Briefcase, Zap, Globe, 
       Users, Gift, LineChart, Trophy, Info, X, Flame, Coins, Dices, HelpCircle,
-      Palette, Maximize2, History, Target, Lock, Unlock, Award, CheckCircle2, ChevronRight, Sparkles, Eye, Bell, User
+      Palette, Maximize2, History, Target, Lock, Unlock, Award, CheckCircle2, ChevronRight, Sparkles, Eye, Bell, User, Shield
     } from 'lucide-react';
 
     // --- INITIALISATION FIREBASE ---
@@ -187,8 +187,8 @@
       { text: "Un tweet mystérieux du PDG fait le buzz mondial.", impact: 15, isGrey: true }
     ];
 
-    // --- COMPOSANT GRAPHIQUE SVG AMÉLIORÉ ---
-    const SparklineChart = ({ data, isPositive, averageBuyPrice, sharesCount, zoomLevel, showMarkers, transactions, themeColor }) => {
+    // --- COMPOSANT GRAPHIQUE SVG AMÉLIORÉ (Bug Labo Corrigé) ---
+    const SparklineChart = ({ data, isPositive, averageBuyPrice, sharesCount, zoomLevel, showMarkers, transactions, themeColor, tickDelay = 1000 }) => {
       const containerRef = useRef(null);
       const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
 
@@ -258,15 +258,20 @@
                 </g>
               )}
 
+              {/* Correction de la position temporelle et verticale des marqueurs */}
               {showMarkers && transactions && transactions.map((tx, i) => {
                  const timeDiff = Date.now() - tx.time;
-                 const estimatedTickMs = 700; 
-                 const windowMs = chartStats.dataLength * estimatedTickMs; 
+                 const windowMs = chartStats.dataLength * tickDelay; 
                  
-                 if (timeDiff > windowMs) return null;
+                 // On ne dessine pas les points qui sont sortis de la fenêtre temporelle
+                 if (timeDiff > windowMs || timeDiff < 0) return null;
                  
                  const x = width - (timeDiff / windowMs) * width;
                  const y = height - ((tx.price - chartStats.minVal) / chartStats.range) * height;
+                 
+                 // On ne dessine pas les points qui sortiraient par erreur du cadre de la div
+                 if (isNaN(x) || isNaN(y) || y < -20 || y > height + 20) return null;
+
                  const txColor = tx.type === 'BUY' ? '#10b981' : '#f43f5e';
                  
                  return (
@@ -306,6 +311,12 @@
       const [leaderboard, setLeaderboard] = useState([]);
       const [pseudoInput, setPseudoInput] = useState('');
       const [selectedPlayer, setSelectedPlayer] = useState(null);
+
+      // VARIABLES ADMIN
+      const [isAdminMode, setIsAdminMode] = useState(false);
+      const [showAdminPrompt, setShowAdminPrompt] = useState(false);
+      const [adminPwd, setAdminPwd] = useState('');
+      const [confirmReset, setConfirmReset] = useState(false);
 
       const [stakingEarnings, setStakingEarnings] = useState(0);
 
@@ -586,7 +597,8 @@
         const lbCol = collection(db, 'artifacts', appId, 'public', 'data', 'leaderboard');
         const unsubLeaderboard = onSnapshot(lbCol, (snapshot) => {
           let data = [];
-          snapshot.forEach(d => data.push(d.data()));
+          // On sauvegarde l'id (uid) du joueur pour pouvoir agir dessus depuis l'espace Admin
+          snapshot.forEach(d => data.push({ id: d.id, ...d.data() }));
           data.sort((a, b) => b.totalValue - a.totalValue);
           setLeaderboard(data.slice(0, 50));
         });
@@ -1083,10 +1095,11 @@
       const daily = portfolio?.dailyQuests || { tradesCount: 0, rouletteCount: 0, aeternaBought: 0, claimedToday: false };
       const dailyCompleted = daily.tradesCount >= 10 && daily.rouletteCount >= 3 && daily.aeternaBought >= 1;
 
-      // VARIABLES VERROUILLAGE
+      // VARIABLES VERROUILLAGE & TICK RATE POUR LE GRAPHIQUE
       const isMarketUnlocked = portfolio?.upgrades?.unlockedMarkets?.includes(activeMarketId);
       const isLaboUnlocked = portfolio?.upgrades?.laboUnlocked;
       const currentMaxStaking = portfolio?.upgrades?.whaleWallet ? 250 : MAX_STAKING_RESERVOIR;
+      const targetTickDelay = MARKETS_CONFIG[activeMarketId].tickRate === 0 ? 400 : (MARKETS_CONFIG[activeMarketId].tickRate === 1 ? 900 : 1900);
 
       // VARIABLES RECOMPENSES HEBDOMADAIRES (TOP 3)
       const currentWeekId = Math.floor(Date.now() / (7 * 24 * 60 * 60 * 1000));
@@ -1128,10 +1141,68 @@
             ))}
           </div>
 
+          {/* MODALE ADMIN (Remplacement du prompt bloqué par le navigateur) */}
+          {showAdminPrompt && (
+             <div className="fixed inset-0 z-[200] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in zoom-in duration-300">
+                <div className={`${theme.panel} border ${theme.border} p-6 rounded-3xl max-w-sm w-full relative shadow-[0_0_50px_rgba(0,0,0,0.8)]`}>
+                   <button onClick={() => { setShowAdminPrompt(false); setAdminPwd(''); }} className="absolute top-4 right-4 p-2 bg-white/5 hover:bg-rose-500/20 hover:text-rose-400 rounded-full transition-colors">
+                       <X className="w-4 h-4"/>
+                   </button>
+                   <h2 className="text-xl font-black text-white mb-4 flex items-center gap-2"><Shield className="w-5 h-5 text-rose-500"/> Accès Admin</h2>
+                   <input 
+                      type="password" 
+                      value={adminPwd} 
+                      onChange={(e) => setAdminPwd(e.target.value)} 
+                      placeholder="Code secret..." 
+                      className="w-full bg-black/60 border border-white/10 rounded-xl px-4 py-3 outline-none focus:border-rose-500 transition-colors text-sm mb-4"
+                      onKeyDown={(e) => {
+                         if(e.key === 'Enter') {
+                            if(adminPwd === 'azerty') {
+                               setIsAdminMode(true);
+                               setActiveTab('admin');
+                               setShowAdminPrompt(false);
+                               setAdminPwd('');
+                               addNotification("Accès Administrateur validé.", "success");
+                            } else {
+                               addNotification("Code administrateur incorrect.", "error");
+                               setAdminPwd('');
+                               setShowAdminPrompt(false);
+                            }
+                         }
+                      }}
+                   />
+                   <button 
+                      onClick={() => {
+                         if(adminPwd === 'azerty') {
+                            setIsAdminMode(true);
+                            setActiveTab('admin');
+                            setShowAdminPrompt(false);
+                            setAdminPwd('');
+                            addNotification("Accès Administrateur validé.", "success");
+                         } else {
+                            addNotification("Code administrateur incorrect.", "error");
+                            setAdminPwd('');
+                            setShowAdminPrompt(false);
+                         }
+                      }}
+                      className="w-full bg-rose-600 hover:bg-rose-500 text-white font-bold py-2.5 rounded-xl transition-colors text-sm"
+                   >
+                      Valider
+                   </button>
+                </div>
+             </div>
+          )}
+
           <header className={`border-b ${theme.border} ${theme.bg}/80 backdrop-blur-md sticky top-0 z-40 transition-colors`}>
             <div className="max-w-6xl mx-auto py-4 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Globe className={`w-5 h-5 text-${theme.primary}-400 shrink-0`} />
+              <div className="flex items-center gap-2 cursor-pointer group" onClick={() => {
+                  if (!isAdminMode) {
+                      setShowAdminPrompt(true);
+                  } else {
+                      setActiveTab('admin');
+                  }
+              }}>
+                <Globe className={`w-5 h-5 text-${theme.primary}-400 shrink-0 group-hover:animate-spin`} />
                 <h1 className="text-base sm:text-lg font-bold tracking-tight truncate">TRADEX<span className={`text-${theme.primary}-500`}>.LIVE</span></h1>
               </div>
               <div className="flex gap-2 sm:gap-6 text-sm items-center shrink-0">
@@ -1265,6 +1336,7 @@
                       )}
 
                       <div className={`h-60 sm:h-80 lg:h-96 w-full ${theme.panel} border ${theme.border} rounded-2xl p-4 shadow-xl relative`}>
+                        {/* TICK DELAY est passé dynamiquement pour synchroniser les marqueurs */}
                         <SparklineChart 
                           data={dataToChart} 
                           isPositive={isPositiveTrend} 
@@ -1274,6 +1346,7 @@
                           showMarkers={portfolio?.upgrades?.tradeMarkers}
                           transactions={portfolio?.transactions?.[activeMarketId]}
                           themeColor={theme.primary}
+                          tickDelay={targetTickDelay}
                         />
                         <div className="absolute inset-0 pointer-events-none opacity-[0.03]" style={{ backgroundImage: 'linear-gradient(to right, #fff 1px, transparent 1px), linear-gradient(to bottom, #fff 1px, transparent 1px)', backgroundSize: '40px 40px' }}></div>
                       </div>
@@ -1628,6 +1701,97 @@
                            <Activity className="w-5 h-5 shrink-0"/> Statistiques Détaillées
                         </h3>
                         <StatsCard stats={portfolio?.stats} isCurrentUser={true} />
+                     </div>
+                  </div>
+               </div>
+            )}
+
+            {/* ONGLET ADMINISTRATEUR SECRET */}
+            {activeTab === 'admin' && isAdminMode && (
+               <div className="max-w-4xl mx-auto space-y-6 sm:space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                  <div className={`${theme.panel} border border-rose-500/50 rounded-2xl p-6 sm:p-8 shadow-[0_0_30px_rgba(244,63,94,0.15)] relative overflow-hidden`}>
+                     <h2 className="text-2xl font-black text-rose-500 mb-6 flex items-center gap-2">
+                         <Shield className="w-6 h-6"/> Panneau d'Administration
+                     </h2>
+                     
+                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 relative z-10">
+                        <div className="bg-black/40 border border-rose-500/30 p-5 rounded-xl flex flex-col justify-between">
+                           <div>
+                               <h3 className="font-bold text-white mb-2">Réinitialisation Globale</h3>
+                               <p className="text-xs text-zinc-400 mb-5">Remet le solde de l'ensemble des joueurs présents dans le classement à 10 000$.</p>
+                           </div>
+                           <button 
+                             onClick={() => {
+                                if(!confirmReset) {
+                                   setConfirmReset(true);
+                                   setTimeout(() => setConfirmReset(false), 3000);
+                                } else {
+                                   leaderboard.forEach(async (player) => {
+                                      if(player.id) {
+                                         const pRef = doc(db, 'artifacts', appId, 'users', player.id, 'portfolio', 'state');
+                                         await setDoc(pRef, { balance: 10000 }, { merge: true });
+                                      }
+                                   });
+                                   addNotification("Tous les comptes du classement ont été réinitialisés.", "success");
+                                   setConfirmReset(false);
+                                }
+                             }}
+                             className={`w-full text-white font-bold py-2.5 rounded-lg transition-colors text-sm ${confirmReset ? 'bg-red-600 hover:bg-red-500 animate-pulse' : 'bg-rose-600 hover:bg-rose-500'}`}
+                           >
+                              {confirmReset ? 'Confirmer (Recliquer)' : 'Tout réinitialiser (10k)'}
+                           </button>
+                        </div>
+                        
+                        <div className="bg-black/40 border border-emerald-500/30 p-5 rounded-xl flex flex-col justify-between">
+                           <div>
+                               <h3 className="font-bold text-emerald-400 mb-2">S'enrichir (Self)</h3>
+                               <p className="text-xs text-zinc-400 mb-5">Ajoute 1 000 000$ immédiatement sur votre portefeuille personnel.</p>
+                           </div>
+                           <button 
+                             onClick={async () => {
+                                const pRef = doc(db, 'artifacts', appId, 'users', user.uid, 'portfolio', 'state');
+                                await setDoc(pRef, { balance: portfolio.balance + 1000000 }, { merge: true });
+                                addNotification("1 000 000$ ajoutés à votre compte.", "success");
+                             }}
+                             className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 rounded-lg transition-colors text-sm"
+                           >
+                              + 1 000 000$
+                           </button>
+                        </div>
+
+                        <div className="bg-black/40 border border-amber-500/30 p-5 rounded-xl flex flex-col justify-between">
+                           <div>
+                               <h3 className="font-bold text-amber-400 mb-2">Forcer un Événement Positif</h3>
+                               <p className="text-xs text-zinc-400 mb-5">Déclenche un Bull Run (Volatilité à la hausse x2.5) sur le marché sélectionné ({MARKETS_CONFIG[activeMarketId].name}).</p>
+                           </div>
+                           <button 
+                             onClick={async () => {
+                                const mRef = doc(db, 'artifacts', appId, 'public', 'data', 'markets', activeMarketId);
+                                await setDoc(mRef, { flashEvent: { type: 'bull_run', endTime: Date.now() + 60000, active: true } }, { merge: true });
+                                addNotification("Bull Run mondial déclenché sur " + MARKETS_CONFIG[activeMarketId].name, "success");
+                             }}
+                             className="w-full bg-amber-600 hover:bg-amber-500 text-white font-bold py-2.5 rounded-lg transition-colors text-sm"
+                           >
+                              Déclencher Bull Run (60s)
+                           </button>
+                        </div>
+
+                        <div className="bg-black/40 border border-purple-500/30 p-5 rounded-xl flex flex-col justify-between">
+                           <div>
+                               <h3 className="font-bold text-purple-400 mb-2">Forcer un Crash</h3>
+                               <p className="text-xs text-zinc-400 mb-5">Déclenche un Flash Crash massif (Volatilité à la baisse x2.5) sur le marché sélectionné ({MARKETS_CONFIG[activeMarketId].name}).</p>
+                           </div>
+                           <button 
+                             onClick={async () => {
+                                const mRef = doc(db, 'artifacts', appId, 'public', 'data', 'markets', activeMarketId);
+                                await setDoc(mRef, { flashEvent: { type: 'flash_crash', endTime: Date.now() + 60000, active: true } }, { merge: true });
+                                addNotification("Flash Crash mondial déclenché sur " + MARKETS_CONFIG[activeMarketId].name, "success");
+                             }}
+                             className="w-full bg-purple-600 hover:bg-purple-500 text-white font-bold py-2.5 rounded-lg transition-colors text-sm"
+                           >
+                              Déclencher Flash Crash (60s)
+                           </button>
+                        </div>
                      </div>
                   </div>
                </div>
