@@ -16,6 +16,7 @@
     {
         "imports": {
             "react": "https://esm.sh/react@18.2.0",
+            "react/jsx-runtime": "https://esm.sh/react@18.2.0/jsx-runtime",
             "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
             "firebase/app": "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js",
             "firebase/auth": "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js",
@@ -38,52 +39,32 @@
         });
         window.__app_id = "aurabienveillance-trading";
     </script>
+
+    <style>
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
+        .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+        .pb-safe { padding-bottom: env(safe-area-inset-bottom, 20px); }
+    </style>
 </head>
-<body class="bg-[#09090b] text-zinc-100 min-h-screen select-none">
+<body class="bg-[#09090b] text-zinc-100 min-h-screen select-none transition-colors duration-500 overflow-x-hidden">
     
     <!-- Conteneur principal du site -->
     <div id="root"></div>
 
-    <!-- DÉBUT DE TON CODE INTACT -->
     <script type="text/babel" data-type="module">
     import { createRoot } from 'react-dom/client';
-    
     import React, { useState, useEffect, useRef, useMemo } from 'react';
     import { initializeApp } from 'firebase/app';
     import { 
-      getAuth, 
-      signInAnonymously, 
-      signInWithCustomToken, 
-      onAuthStateChanged 
+      getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged 
     } from 'firebase/auth';
     import { 
-      getFirestore, 
-      doc, 
-      setDoc, 
-      getDoc, 
-      onSnapshot,
-      collection,
-      deleteField
+      getFirestore, doc, setDoc, getDoc, onSnapshot, collection, deleteField
     } from 'firebase/firestore';
     import { 
-      TrendingUp, 
-      TrendingDown, 
-      Activity, 
-      AlertCircle, 
-      DollarSign, 
-      Briefcase,
-      Zap,
-      Globe,
-      Users,
-      Gift,
-      LineChart,
-      Trophy,
-      Info,
-      X,
-      Flame,
-      Coins,
-      Dices,
-      HelpCircle
+      TrendingUp, TrendingDown, Activity, AlertCircle, DollarSign, Briefcase, Zap, Globe, 
+      Users, Gift, LineChart, Trophy, Info, X, Flame, Coins, Dices, HelpCircle,
+      Palette, Maximize2, History, Target, Lock, Unlock, Award, CheckCircle2, ChevronRight, Sparkles, Eye, Bell, User
     } from 'lucide-react';
 
     // --- INITIALISATION FIREBASE ---
@@ -94,85 +75,100 @@
     const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
     // --- PARAMÈTRES DU JEU ---
-    const REWARD_COOLDOWN = 24 * 60 * 60 * 1000; // 24 heures en millisecondes
-    const REWARD_AMOUNT = 500; // Montant de base du bonus journalier
-    const MAX_STAKING_RESERVOIR = 50.00; // Intérêt passif cumulable max
-    const STAKING_RATE = 0.05; // $ accumulés par seconde
+    const REWARD_COOLDOWN = 24 * 60 * 60 * 1000; 
+    const REWARD_AMOUNT = 500; 
+    const MAX_STAKING_RESERVOIR = 50.00; 
+    const STAKING_RATE = 0.05; 
 
-    // --- CONFIGURATION DES 3 MARCHÉS (NOMS CACHÉS) ---
+    // Configuration des marchés avec système de déverrouillage
     const MARKETS_CONFIG = {
-      'm_slow': { id: 'm_slow', name: 'SafeBuild', basePrice: 50, vol: 0.6, tickRate: 3 }, // Lent
-      'm_medium': { id: 'm_medium', name: 'Tradex', basePrice: 100, vol: 2.5, tickRate: 1 }, // Moyen
-      'm_fast': { id: 'm_fast', name: 'QuantumX', basePrice: 15, vol: 6.0, tickRate: 0 } // Rapide
+      'm_medium': { id: 'm_medium', name: 'Tradex', basePrice: 100, vol: 2.5, tickRate: 1, unlockCost: 0 },
+      'm_slow': { id: 'm_slow', name: 'SafeBuild', basePrice: 50, vol: 0.6, tickRate: 3, unlockCost: 15000 },
+      'm_fast': { id: 'm_fast', name: 'QuantumX', basePrice: 15, vol: 6.0, tickRate: 0, unlockCost: 35000 }
     };
-    const MARKET_IDS = Object.keys(MARKETS_CONFIG);
+    // On force l'ordre d'affichage
+    const MARKET_IDS = ['m_slow', 'm_medium', 'm_fast'];
 
-    // --- SYNTHÉTISEUR AUDIO WEB AUDIO API (AUTO-CONTENU) ---
+    // --- DICTIONNAIRE DES SUCCÈS ---
+    const ACHIEVEMENTS_LIST = [
+      { id: 'first_trade', title: 'Premier Sang', desc: 'Effectuez votre premier trade.', icon: Target, color: 'text-emerald-400 bg-emerald-500/10' },
+      { id: 'wealthy_1', title: 'Capitaliste', desc: 'Atteignez 50 000$ de capital total.', icon: DollarSign, color: 'text-amber-400 bg-amber-500/10' },
+      { id: 'wealthy_2', title: 'Loup de Wall Street', desc: 'Atteignez 250 000$ de capital total.', icon: Briefcase, color: 'text-rose-400 bg-rose-500/10' },
+      { id: 'millionaire', title: 'Millionnaire', desc: 'Atteignez 1 000 000$ de capital total.', icon: Trophy, color: 'text-yellow-300 bg-yellow-500/20' },
+      { id: 'loyal_trader', title: 'Trader Assidu', desc: 'Atteignez une série de 7 jours consécutifs.', icon: Flame, color: 'text-orange-400 bg-orange-500/10' },
+      { id: 'collector', title: 'Collectionneur', desc: 'Achetez au moins 2 améliorations cosmétiques.', icon: Palette, color: 'text-fuchsia-400 bg-fuchsia-500/10' },
+      { id: 'diversified', title: 'Portfolio Diversifié', desc: 'Possédez des actions dans les 3 marchés normaux simultanément.', icon: Briefcase, color: 'text-indigo-400 bg-indigo-500/10' },
+      { id: 'aeterna_vision', title: 'Visionnaire Aeterna', desc: 'Possédez au moins 50 parts du fonds Aeterna.', icon: Zap, color: 'text-amber-300 bg-amber-500/10' },
+      { id: 'labo_initiate', title: 'Initiation au Marché Noir', desc: 'Débloquez l\'accès au Labo clandestin.', icon: Unlock, color: 'text-purple-400 bg-purple-500/10' },
+      { id: 'champion_or', title: 'Médaille d\'Or', desc: 'A terminé Top 1 mondial de la semaine.', icon: Trophy, color: 'text-yellow-400 bg-yellow-500/10' },
+      { id: 'champion_argent', title: 'Médaille d\'Argent', desc: 'A terminé Top 2 mondial de la semaine.', icon: Trophy, color: 'text-gray-300 bg-gray-400/10' },
+      { id: 'champion_bronze', title: 'Médaille de Bronze', desc: 'A terminé Top 3 mondial de la semaine.', icon: Trophy, color: 'text-amber-600 bg-amber-700/10' }
+    ];
+
+    // --- DÉFINITION DES THÈMES ---
+    const THEMES = {
+      'default': { bg: 'bg-[#09090b]', text: 'text-zinc-100', primary: 'emerald', border: 'border-zinc-800', panel: 'bg-[#121214]' },
+      'cyberpunk': { bg: 'bg-[#12001a]', text: 'text-fuchsia-100', primary: 'fuchsia', border: 'border-fuchsia-900/50', panel: 'bg-[#1e002e]' },
+      'gold': { bg: 'bg-[#1a1810]', text: 'text-amber-100', primary: 'amber', border: 'border-amber-900/50', panel: 'bg-[#262211]' },
+      'hacker': { bg: 'bg-[#051005]', text: 'text-emerald-100', primary: 'green', border: 'border-green-900/50', panel: 'bg-[#0a1a0a]' },
+      'matrix': { bg: 'bg-black', text: 'text-green-300', primary: 'green', border: 'border-green-900', panel: 'bg-[#001100]' }
+    };
+
+    // --- FONCTIONS UTILITAIRES ---
+    const formatPlayTime = (seconds) => {
+        if (!seconds) return "0h 0m";
+        const h = Math.floor(seconds / 3600);
+        const m = Math.floor((seconds % 3600) / 60);
+        return `${h}h ${m}m`;
+    };
+
+    // --- SYNTHÉTISEUR AUDIO WEB AUDIO API ---
     let globalAudioCtx = null;
     const playSound = (type) => {
       try {
         const AudioContext = window.AudioContext || window.webkitAudioContext;
         if (!AudioContext) return;
-        
-        if (!globalAudioCtx) {
-          globalAudioCtx = new AudioContext();
-        }
-        if (globalAudioCtx.state === 'suspended') {
-          globalAudioCtx.resume();
-        }
-        
+        if (!globalAudioCtx) globalAudioCtx = new AudioContext();
+        if (globalAudioCtx.state === 'suspended') globalAudioCtx.resume();
         const ctx = globalAudioCtx;
         const now = ctx.currentTime;
 
-        if (type === 'claim' || type === 'win') {
-          // Son de récompense joyeux (Arpège ascendant rapide)
-          const notes = type === 'claim' ? [587.33, 880] : [523.25, 659.25, 783.99, 1046.50];
+        if (type === 'claim' || type === 'win' || type === 'buy_upgrade') {
+          const notes = type === 'buy_upgrade' ? [440, 554.37, 659.25, 880] : (type === 'claim' ? [587.33, 880] : [523.25, 659.25, 783.99, 1046.50]);
           notes.forEach((freq, i) => {
             const osc = ctx.createOscillator();
             const gain = ctx.createGain();
-            osc.connect(gain);
-            gain.connect(ctx.destination);
-            osc.type = 'sine';
+            osc.connect(gain); gain.connect(ctx.destination);
+            osc.type = type === 'buy_upgrade' ? 'triangle' : 'sine';
             osc.frequency.setValueAtTime(freq, now + i * 0.08);
             gain.gain.setValueAtTime(0.12, now + i * 0.08);
             gain.gain.exponentialRampToValueAtTime(0.01, now + i * 0.08 + 0.25);
-            osc.start(now + i * 0.08);
-            osc.stop(now + i * 0.08 + 0.3);
+            osc.start(now + i * 0.08); osc.stop(now + i * 0.08 + 0.3);
           });
-        } else if (type === 'lose') {
-          // Son de défaite (Baisse de fréquence un peu triste)
+        } else if (type === 'lose' || type === 'error') {
           const osc = ctx.createOscillator();
           const gain = ctx.createGain();
-          osc.connect(gain);
-          gain.connect(ctx.destination);
+          osc.connect(gain); gain.connect(ctx.destination);
           osc.type = 'sawtooth';
-          osc.frequency.setValueAtTime(220, now);
-          osc.frequency.linearRampToValueAtTime(110, now + 0.45);
+          osc.frequency.setValueAtTime(type === 'error' ? 150 : 220, now);
+          osc.frequency.linearRampToValueAtTime(type === 'error' ? 100 : 110, now + 0.45);
           gain.gain.setValueAtTime(0.12, now);
           gain.gain.exponentialRampToValueAtTime(0.01, now + 0.45);
-          osc.start(now);
-          osc.stop(now + 0.5);
+          osc.start(now); osc.stop(now + 0.5);
         } else if (type === 'tick') {
-          // Son mécanique de rotation roulette
           const osc = ctx.createOscillator();
           const gain = ctx.createGain();
-          osc.connect(gain);
-          gain.connect(ctx.destination);
+          osc.connect(gain); gain.connect(ctx.destination);
           osc.type = 'triangle';
           osc.frequency.setValueAtTime(800, now);
           gain.gain.setValueAtTime(0.05, now);
           gain.gain.exponentialRampToValueAtTime(0.01, now + 0.04);
-          osc.start(now);
-          osc.stop(now + 0.05);
+          osc.start(now); osc.stop(now + 0.05);
         }
-      } catch (e) {
-        console.warn("Audio Context bloqué ou non pris en charge par le navigateur :", e);
-      }
+      } catch (e) { console.warn("Audio bloqué", e); }
     };
 
-    // --- ACTUALITÉS ALÉATOIRES (ENRICHIES + GRISES) ---
     const NEWS_EVENTS = [
-      // Actualités classiques
       { text: "Elon Musk tweete un mème sur l'entreprise.", impact: 15 },
       { text: "Faille de sécurité majeure découverte dans le système.", impact: -20 },
       { text: "Nouveau partenariat stratégique avec un géant de la tech.", impact: 12 },
@@ -183,9 +179,7 @@
       { text: "Un concurrent lance un produit nettement supérieur.", impact: -12 },
       { text: "L'entreprise achète pour 1 milliard de Bitcoin.", impact: 8 },
       { text: "Enquête du régulateur financier ouverte aujourd'hui.", impact: -18 },
-      
-      // Nouvelles Actualités Grises (Mystères)
-      { text: "Le gouvernement annonce une nouvelle loi de régulation sur le secteur.", impact: -15, isGrey: true },
+      { text: "Le gouvernement annonce une nouvelle loi de régulation.", impact: -15, isGrey: true },
       { text: "Changement inattendu à la direction financière ce matin.", impact: -12, isGrey: true },
       { text: "Une rumeur d'acquisition circule activement sur les réseaux sociaux.", impact: 20, isGrey: true },
       { text: "Publication imminente du rapport trimestriel très attendu.", impact: 10, isGrey: true },
@@ -193,65 +187,55 @@
       { text: "Un tweet mystérieux du PDG fait le buzz mondial.", impact: 15, isGrey: true }
     ];
 
-    // --- COMPOSANT GRAPHIQUE SVG SUR MESURE ---
-    const SparklineChart = ({ data, isPositive, averageBuyPrice, sharesCount }) => {
+    // --- COMPOSANT GRAPHIQUE SVG AMÉLIORÉ ---
+    const SparklineChart = ({ data, isPositive, averageBuyPrice, sharesCount, zoomLevel, showMarkers, transactions, themeColor }) => {
       const containerRef = useRef(null);
       const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
 
       useEffect(() => {
-        const updateSize = () => {
-          if (containerRef.current) {
-            setDimensions({
-              width: containerRef.current.clientWidth || containerRef.current.offsetWidth || 0,
-              height: containerRef.current.clientHeight || containerRef.current.offsetHeight || 0
-            });
-          }
-        };
-        
-        const timer = setTimeout(updateSize, 100);
-        window.addEventListener('resize', updateSize);
-        updateSize();
-        return () => {
-          window.removeEventListener('resize', updateSize);
-          clearTimeout(timer);
-        };
-      }, [data]);
+        if (!containerRef.current) return;
+        const observer = new ResizeObserver(entries => {
+          if (!Array.isArray(entries) || !entries.length) return;
+          const { width, height } = entries[0].contentRect;
+          setDimensions({ width, height });
+        });
+        observer.observe(containerRef.current);
+        return () => observer.disconnect();
+      }, []);
 
       const { width, height } = dimensions;
 
+      const visibleData = useMemo(() => {
+        if (!data || data.length === 0) return [];
+        const visibleCount = Math.max(10, Math.floor(data.length / zoomLevel));
+        return data.slice(-visibleCount);
+      }, [data, zoomLevel]);
+
       const chartStats = useMemo(() => {
-        if (!data || data.length === 0 || width === 0 || height === 0) return null;
-        
-        let minVal = Math.min(...data);
-        let maxVal = Math.max(...data);
-        
+        if (!visibleData || visibleData.length === 0 || width === 0 || height === 0) return null;
+        let minVal = Math.min(...visibleData);
+        let maxVal = Math.max(...visibleData);
         if (sharesCount > 0 && averageBuyPrice) {
           minVal = Math.min(minVal, averageBuyPrice);
           maxVal = Math.max(maxVal, averageBuyPrice);
         }
-
-        minVal *= 0.99;
-        maxVal *= 1.01;
+        minVal *= 0.99; maxVal *= 1.01;
         const range = maxVal - minVal || 1;
 
-        const points = data.map((val, index) => {
-          const x = (index / (data.length - 1)) * width;
+        const points = visibleData.map((val, index) => {
+          const x = (index / (visibleData.length - 1)) * width;
           const y = height - ((val - minVal) / range) * height;
           return `${x},${y}`;
         });
 
-        return {
-          path: `M ${points.join(' L ')}`,
-          minVal,
-          maxVal,
-          range
-        };
-      }, [data, width, height, averageBuyPrice, sharesCount]);
+        return { path: `M ${points.join(' L ')}`, minVal, maxVal, range, dataLength: visibleData.length };
+      }, [visibleData, width, height, averageBuyPrice, sharesCount]);
 
-      const color = isPositive ? '#10b981' : '#f43f5e';
+      const defaultColor = isPositive ? '#10b981' : '#f43f5e';
+      const color = themeColor === 'amber' ? '#f59e0b' : themeColor === 'fuchsia' ? '#d946ef' : defaultColor;
 
       return (
-        <div ref={containerRef} className="w-full h-full relative overflow-hidden">
+        <div ref={containerRef} className="w-full h-full relative overflow-hidden rounded-xl">
           {width > 0 && height > 0 && chartStats && (
             <svg width={width} height={height} className="overflow-visible">
               <defs>
@@ -261,73 +245,54 @@
                 </linearGradient>
               </defs>
               
-              <path
-                d={`${chartStats.path} L ${width},${height} L 0,${height} Z`}
-                fill="url(#gradient)"
-                className="transition-all duration-300 ease-linear"
-              />
-              
-              <path
-                d={chartStats.path}
-                fill="none"
-                stroke={color}
-                strokeWidth="3"
-                strokeLinejoin="round"
-                strokeLinecap="round"
-                className="transition-all duration-300 ease-linear"
-                style={{ filter: `drop-shadow(0 0 8px ${color}88)` }}
-              />
+              <path d={`${chartStats.path} L ${width},${height} L 0,${height} Z`} fill="url(#gradient)" className="transition-all duration-300 ease-linear" />
+              <path d={chartStats.path} fill="none" stroke={color} strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" className="transition-all duration-300 ease-linear" style={{ filter: `drop-shadow(0 0 8px ${color}88)` }} />
               
               {sharesCount > 0 && averageBuyPrice > 0 && (
                 <g className="transition-all duration-500 ease-in-out">
-                  <line
-                    x1="0"
-                    y1={height - ((averageBuyPrice - chartStats.minVal) / chartStats.range) * height}
-                    x2={width}
-                    y2={height - ((averageBuyPrice - chartStats.minVal) / chartStats.range) * height}
-                    stroke="#a1a1aa"
-                    strokeWidth="1.5"
-                    strokeDasharray="6,4"
-                    className="opacity-70"
-                  />
-                  <rect 
-                    x="10" 
-                    y={Math.max(5, Math.min(height - 25, height - ((averageBuyPrice - chartStats.minVal) / chartStats.range) * height - 12))} 
-                    width="74" 
-                    height="18" 
-                    rx="4" 
-                    fill="#27272a" 
-                    className="opacity-95"
-                  />
-                  <text
-                    x="14"
-                    y={Math.max(17, Math.min(height - 13, height - ((averageBuyPrice - chartStats.minVal) / chartStats.range) * height + 1))}
-                    fill="#e4e4e7"
-                    fontSize="9"
-                    fontWeight="bold"
-                    fontFamily="monospace"
-                  >
+                  <line x1="0" y1={height - ((averageBuyPrice - chartStats.minVal) / chartStats.range) * height} x2={width} y2={height - ((averageBuyPrice - chartStats.minVal) / chartStats.range) * height} stroke="#a1a1aa" strokeWidth="1.5" strokeDasharray="6,4" className="opacity-70" />
+                  <rect x="10" y={Math.max(5, Math.min(height - 25, height - ((averageBuyPrice - chartStats.minVal) / chartStats.range) * height - 12))} width="74" height="18" rx="4" fill="#27272a" className="opacity-95" />
+                  <text x="14" y={Math.max(17, Math.min(height - 13, height - ((averageBuyPrice - chartStats.minVal) / chartStats.range) * height + 1))} fill="#e4e4e7" fontSize="9" fontWeight="bold" fontFamily="monospace">
                     ACHAT: ${averageBuyPrice.toFixed(1)}
                   </text>
                 </g>
               )}
 
-              <circle
-                 cx={width}
-                 cy={height - ((data[data.length - 1] - chartStats.minVal) / chartStats.range) * height}
-                 r="5"
-                 fill={color}
-                 className="animate-pulse"
-                 style={{ filter: `drop-shadow(0 0 10px ${color})` }}
-              />
+              {showMarkers && transactions && transactions.map((tx, i) => {
+                 const timeDiff = Date.now() - tx.time;
+                 const estimatedTickMs = 700; 
+                 const windowMs = chartStats.dataLength * estimatedTickMs; 
+                 
+                 if (timeDiff > windowMs) return null;
+                 
+                 const x = width - (timeDiff / windowMs) * width;
+                 const y = height - ((tx.price - chartStats.minVal) / chartStats.range) * height;
+                 const txColor = tx.type === 'BUY' ? '#10b981' : '#f43f5e';
+                 
+                 return (
+                   <g key={i} className="animate-in fade-in zoom-in duration-500">
+                     <circle cx={x} cy={y} r="5" fill={txColor} opacity="0.8" style={{ filter: `drop-shadow(0 0 4px ${txColor})` }}/>
+                     <circle cx={x} cy={y} r="8" fill="none" stroke={txColor} strokeWidth="1.5" className="animate-ping opacity-50" />
+                   </g>
+                 )
+              })}
+
+              <circle cx={width} cy={height - ((visibleData[visibleData.length - 1] - chartStats.minVal) / chartStats.range) * height} r="5" fill={color} className="animate-pulse" style={{ filter: `drop-shadow(0 0 10px ${color})` }} />
             </svg>
           )}
         </div>
       );
     };
 
-    // --- COMPOSANT PRINCIPAL ---
+    // --- COMPOSANT PRINCIPAL APP ---
     function App() {
+      // FONDS AETERNA (LONG TERME) - +1% garanti toutes les 24h
+      const getAeternaPrice = () => {
+        const genesisDate = 1704067200000; // 1 Jan 2024 (Point de départ)
+        const daysElapsed = Math.max(0, (Date.now() - genesisDate) / (24 * 60 * 60 * 1000));
+        return 100 * Math.pow(1.01, daysElapsed); 
+      };
+
       const [user, setUser] = useState(null);
       const [portfolio, setPortfolio] = useState(null);
       const [markets, setMarkets] = useState({});
@@ -340,12 +305,10 @@
       const [activeTab, setActiveTab] = useState('trade');
       const [leaderboard, setLeaderboard] = useState([]);
       const [pseudoInput, setPseudoInput] = useState('');
-      const [showInfo, setShowInfo] = useState(false);
+      const [selectedPlayer, setSelectedPlayer] = useState(null);
 
-      // --- ÉTAT D'ACCUMULATION D'INTÉRÊTS ACTIFS ---
       const [stakingEarnings, setStakingEarnings] = useState(0);
 
-      // --- ÉTATS DU MINI-JEU DE CASINO (ROULETTE) ---
       const [rouletteBet, setRouletteBet] = useState(100);
       const [rouletteColor, setRouletteColor] = useState('red');
       const [isSpinning, setIsSpinning] = useState(false);
@@ -353,45 +316,75 @@
       const [rouletteWinnerColor, setRouletteWinnerColor] = useState(null);
       const [rouletteStatusMessage, setRouletteStatusMessage] = useState("Faites vos jeux !");
 
+      const [zoomLevel, setZoomLevel] = useState(1);
+      const [tradeQuantity, setTradeQuantity] = useState(1); // x1 ou x10
+      const [aeternaPrice, setAeternaPrice] = useState(getAeternaPrice());
+      
+      // Liste des IDs d'événements majeurs masqués localement pour moins d'intrusion
+      const [dismissedEvents, setDismissedEvents] = useState([]);
+
+      // SYSTÈME DE NOTIFICATIONS TOAST
+      const [notifications, setNotifications] = useState([]);
+      const triggeredAlertsRef = useRef({});
+
+      const addNotification = (message, type = 'info') => {
+        const id = Date.now() + Math.random();
+        setNotifications(prev => [...prev, { id, message, type }]);
+        setTimeout(() => {
+          setNotifications(prev => prev.filter(n => n.id !== id));
+        }, 5000);
+      };
+
       const marketsRefState = useRef(markets);
+      useEffect(() => { marketsRefState.current = markets; }, [markets]);
+
+      // Met à jour le prix long terme
       useEffect(() => {
-        marketsRefState.current = markets;
-      }, [markets]);
+        const interval = setInterval(() => setAeternaPrice(getAeternaPrice()), 1000);
+        return () => clearInterval(interval);
+      }, []);
 
       useEffect(() => {
         const initAuth = async () => {
           try {
             if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-              try {
-                await signInWithCustomToken(auth, __initial_auth_token);
-              } catch (tokenError) {
-                await signInAnonymously(auth);
-              }
-            } else {
-              await signInAnonymously(auth);
-            }
-          } catch (error) {
-            console.error("Erreur d'authentification:", error);
-          }
+              try { await signInWithCustomToken(auth, __initial_auth_token); } 
+              catch (e) { await signInAnonymously(auth); }
+            } else { await signInAnonymously(auth); }
+          } catch (error) { console.error("Auth error:", error); }
         };
         initAuth();
-
-        const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-          setUser(currentUser);
-        });
+        const unsubscribe = onAuthStateChanged(auth, (currentUser) => setUser(currentUser));
         return () => unsubscribe();
       }, []);
 
+      const portfolioRefState = useRef(portfolio);
+      const totalValueRef = useRef(0);
+      useEffect(() => { portfolioRefState.current = portfolio; }, [portfolio]);
+
       useEffect(() => {
         if (!user) return;
-
         const updatePresence = async () => {
           const presenceRef = doc(db, 'artifacts', appId, 'public', 'data', 'online_users', user.uid);
-          try {
-            await setDoc(presenceRef, { lastActive: Date.now() }, { merge: true });
-          } catch (error) {}
-        };
+          try { await setDoc(presenceRef, { lastActive: Date.now() }, { merge: true }); } catch (error) {}
 
+          const p = portfolioRefState.current;
+          const tv = totalValueRef.current;
+          if (p && p.pseudo) {
+             const currentStats = p.stats || { totalProfit: 0, totalTrades: 0, winningTrades: 0, bestTrade: 0, worstTrade: 0, highestPortfolio: 10000, playTimeSeconds: 0 };
+             let updatedStats = { ...currentStats };
+             updatedStats.playTimeSeconds = (updatedStats.playTimeSeconds || 0) + 15;
+             if (tv > (updatedStats.highestPortfolio || 0)) {
+                 updatedStats.highestPortfolio = tv;
+             }
+             const pRef = doc(db, 'artifacts', appId, 'users', user.uid, 'portfolio', 'state');
+             setDoc(pRef, { stats: updatedStats }, { merge: true });
+
+             // Synchronisation du leaderboard avec les stats pour que les autres joueurs puissent les voir
+             const lbRef = doc(db, 'artifacts', appId, 'public', 'data', 'leaderboard', user.uid);
+             setDoc(lbRef, { pseudo: p.pseudo, totalValue: tv, lastUpdated: Date.now(), stats: updatedStats }, { merge: true });
+          }
+        };
         updatePresence();
         const presenceInterval = setInterval(updatePresence, 15000);
 
@@ -399,25 +392,17 @@
         const unsubPresence = onSnapshot(onlineUsersRef, (snapshot) => {
           const now = Date.now();
           let count = 0;
-          snapshot.forEach(doc => {
-            if (now - doc.data().lastActive < 30000) count++;
-          });
+          snapshot.forEach(doc => { if (now - doc.data().lastActive < 30000) count++; });
           setOnlineCount(Math.max(1, count));
-        }, (error) => console.error("Erreur lecture présence:", error));
+        });
 
-        return () => {
-          clearInterval(presenceInterval);
-          unsubPresence();
-        };
+        return () => { clearInterval(presenceInterval); unsubPresence(); };
       }, [user]);
 
-      // Initialisation de Firebase (Portfolio + 3 Marchés)
       useEffect(() => {
         if (!user) return;
-
         const portfolioRef = doc(db, 'artifacts', appId, 'users', user.uid, 'portfolio', 'state');
 
-        // Init et écoute des marchés
         const initMarkets = async () => {
           for (const mId of MARKET_IDS) {
             const mRef = doc(db, 'artifacts', appId, 'public', 'data', 'markets', mId);
@@ -425,14 +410,9 @@
             if (!snap.exists()) {
               await setDoc(mRef, {
                 price: MARKETS_CONFIG[mId].basePrice,
-                history: Array(40).fill(MARKETS_CONFIG[mId].basePrice),
-                trend: 0,
-                sentimentScore: 0, // NOUVEAU: Score de sentiment des joueurs
-                news: `Ouverture du marché ${MARKETS_CONFIG[mId].name}.`,
-                newsType: 'neutral',
-                lastUpdate: Date.now(),
-                leaderId: user.uid,
-                leaderHeartbeat: Date.now()
+                history: Array(50).fill(MARKETS_CONFIG[mId].basePrice),
+                trend: 0, sentimentScore: 0, news: `Ouverture du marché ${MARKETS_CONFIG[mId].name}.`, newsType: 'neutral',
+                lastUpdate: Date.now(), leaderId: user.uid, leaderHeartbeat: Date.now()
               });
             }
           }
@@ -443,10 +423,8 @@
         for (const mId of MARKET_IDS) {
           const mRef = doc(db, 'artifacts', appId, 'public', 'data', 'markets', mId);
           const unsub = onSnapshot(mRef, (docSnap) => {
-            if (docSnap.exists()) {
-              setMarkets(prev => ({ ...prev, [mId]: docSnap.data() }));
-            }
-          }, (error) => console.error(`Erreur market ${mId}:`, error));
+            if (docSnap.exists()) setMarkets(prev => ({ ...prev, [mId]: docSnap.data() }));
+          });
           unsubscribers.push(unsub);
         }
 
@@ -455,15 +433,34 @@
           if (!snap.exists()) {
             await setDoc(portfolioRef, {
               balance: 10000.00,
-              assets: {
-                'm_slow': { shares: 0, averageBuyPrice: 0 },
-                'm_medium': { shares: 0, averageBuyPrice: 0 },
-                'm_fast': { shares: 0, averageBuyPrice: 0 }
-              },
-              lastRewardClaim: 0,
-              pseudo: "",
-              streak: 1
+              v2_reset: true,
+              lastWeeklyClaim: 0,
+              assets: { 'm_slow': { shares: 0, averageBuyPrice: 0 }, 'm_medium': { shares: 0, averageBuyPrice: 0 }, 'm_fast': { shares: 0, averageBuyPrice: 0 } },
+              lastRewardClaim: 0, pseudo: "", streak: 1,
+              upgrades: { theme: 'default', unlockedThemes: ['default'], extendedHistory: false, tradeMarkers: false, diamondHands: false, unlockedMarkets: ['m_medium'], laboUnlocked: false, insiderTrading: false, whaleWallet: false },
+              transactions: { 'm_slow': [], 'm_medium': [], 'm_fast': [] },
+              achievements: [],
+              stats: { totalProfit: 0, totalTrades: 0, winningTrades: 0, bestTrade: 0, worstTrade: 0, highestPortfolio: 10000, playTimeSeconds: 0 },
+              dailyQuests: {
+                lastReset: Date.now(),
+                tradesCount: 0,
+                rouletteCount: 0,
+                aeternaBought: 0,
+                claimedToday: false
+              }
             });
+          } else {
+            const data = snap.data();
+            let updates = {};
+            if (!data.v2_reset) {
+                updates.balance = 10000.00;
+                updates.v2_reset = true;
+            }
+            if (data.lastWeeklyClaim === undefined) updates.lastWeeklyClaim = 0;
+            if (!data.stats) updates.stats = { totalProfit: 0, totalTrades: 0, winningTrades: 0, bestTrade: 0, worstTrade: 0, highestPortfolio: 10000, playTimeSeconds: 0 };
+            if (Object.keys(updates).length > 0) {
+                await setDoc(portfolioRef, updates, { merge: true });
+            }
           }
         };
         initPortfolio();
@@ -471,46 +468,118 @@
         const unsubPortfolio = onSnapshot(portfolioRef, (docSnap) => {
           if (docSnap.exists()) {
             const data = docSnap.data();
-            // Rétrocompatibilité (Migration des anciens comptes vers m_medium)
-            if (!data.assets) {
-              data.assets = {
-                'm_slow': { shares: 0, averageBuyPrice: 0 },
-                'm_medium': { shares: data.shares || 0, averageBuyPrice: data.averageBuyPrice || 0 },
-                'm_fast': { shares: 0, averageBuyPrice: 0 }
+            if (!data.assets) data.assets = { 'm_slow': { shares: 0, averageBuyPrice: 0 }, 'm_medium': { shares: data.shares || 0, averageBuyPrice: data.averageBuyPrice || 0 }, 'm_fast': { shares: 0, averageBuyPrice: 0 } };
+            if (!data.upgrades) {
+                data.upgrades = { theme: 'default', unlockedThemes: ['default'], extendedHistory: false, tradeMarkers: false, diamondHands: false, unlockedMarkets: ['m_medium'], laboUnlocked: false, insiderTrading: false, whaleWallet: false };
+            } else {
+                if (!data.upgrades.unlockedMarkets) data.upgrades.unlockedMarkets = ['m_medium'];
+                if (data.upgrades.laboUnlocked === undefined) data.upgrades.laboUnlocked = false;
+                if (data.upgrades.insiderTrading === undefined) data.upgrades.insiderTrading = false;
+                if (data.upgrades.whaleWallet === undefined) data.upgrades.whaleWallet = false;
+            }
+            if (!data.transactions) data.transactions = { 'm_slow': [], 'm_medium': [], 'm_fast': [] };
+            if (!data.achievements) data.achievements = [];
+            if (!data.stats) data.stats = { totalProfit: 0, totalTrades: 0, winningTrades: 0, bestTrade: 0, worstTrade: 0, highestPortfolio: 10000, playTimeSeconds: 0 };
+            if (!data.dailyQuests) {
+              data.dailyQuests = {
+                lastReset: Date.now(),
+                tradesCount: 0,
+                rouletteCount: 0,
+                aeternaBought: 0,
+                claimedToday: false
               };
             }
+            if (data.lastWeeklyClaim === undefined) data.lastWeeklyClaim = 0;
+            if (data.v2_reset === undefined) data.v2_reset = true;
+            
             setPortfolio(data);
             setIsLoading(false);
           }
-        }, (error) => console.error("Erreur portfolio:", error));
+        });
 
-        return () => {
-          unsubscribers.forEach(unsub => unsub());
-          unsubPortfolio();
-        };
+        return () => { unsubscribers.forEach(unsub => unsub()); unsubPortfolio(); };
       }, [user]);
 
-      // Calcul Valeur Totale pour Leaderboard
+      // GESTION DU THEME DANS UN EFFECT POUR ÉVITER LES RENDER LOOPS
+      useEffect(() => {
+        if (!portfolio?.upgrades?.theme) return;
+        const currentThemeId = portfolio.upgrades.theme;
+        const theme = THEMES[currentThemeId] || THEMES['default'];
+        document.body.className = `${theme.bg} ${theme.text} min-h-screen transition-colors duration-500 selection:bg-${theme.primary}-500/30 pb-28 overflow-x-hidden`;
+      }, [portfolio?.upgrades?.theme]);
+
+      // RESET DES DÉFIS QUOTIDIENS APRÈS 24H
+      useEffect(() => {
+        if (!user || !portfolio?.dailyQuests) return;
+        const lastReset = portfolio.dailyQuests.lastReset || 0;
+        const now = Date.now();
+        const oneDayMs = 24 * 60 * 60 * 1000;
+        if (now - lastReset >= oneDayMs) {
+          const portfolioRef = doc(db, 'artifacts', appId, 'users', user.uid, 'portfolio', 'state');
+          setDoc(portfolioRef, {
+            dailyQuests: {
+              lastReset: now,
+              tradesCount: 0,
+              rouletteCount: 0,
+              aeternaBought: 0,
+              claimedToday: false
+            }
+          }, { merge: true });
+        }
+      }, [portfolio?.dailyQuests?.lastReset, user]);
+
       const totalValueComputed = useMemo(() => {
         if (!portfolio || !portfolio.assets) return 0;
         let totalSharesValue = 0;
         for (const mId of MARKET_IDS) {
-          if (portfolio.assets[mId] && markets[mId]) {
-            totalSharesValue += portfolio.assets[mId].shares * markets[mId].price;
-          }
+          if (portfolio.assets[mId] && markets[mId]) totalSharesValue += portfolio.assets[mId].shares * markets[mId].price;
+        }
+        // Ajout de la valeur du fonds long terme
+        if (portfolio.assets['m_longterm']) {
+            totalSharesValue += portfolio.assets['m_longterm'].shares * aeternaPrice;
         }
         return portfolio.balance + totalSharesValue;
-      }, [portfolio, markets]);
+      }, [portfolio, markets, aeternaPrice]);
 
+      useEffect(() => { totalValueRef.current = totalValueComputed; }, [totalValueComputed]);
+
+      // VÉRIFICATION DÉBLOCAGE DU LABO (Marché Noir)
       useEffect(() => {
-        if (!user || !portfolio?.pseudo || Object.keys(markets).length < 3) return;
-        const lbRef = doc(db, 'artifacts', appId, 'public', 'data', 'leaderboard', user.uid);
-        setDoc(lbRef, {
-          pseudo: portfolio.pseudo,
-          totalValue: totalValueComputed,
-          lastUpdated: Date.now()
-        }, { merge: true }).catch(e => console.error("Erreur maj score:", e));
-      }, [user, portfolio?.pseudo, totalValueComputed, markets]);
+        if (portfolio && !portfolio.upgrades?.laboUnlocked && totalValueComputed >= 15000) {
+            const portfolioRef = doc(db, 'artifacts', appId, 'users', user.uid, 'portfolio', 'state');
+            const newUpgrades = { ...portfolio.upgrades, laboUnlocked: true };
+            setPortfolio(p => ({ ...p, upgrades: newUpgrades }));
+            setDoc(portfolioRef, { upgrades: newUpgrades }, { merge: true });
+            playSound('win');
+            addNotification('Félicitations ! Le Marché Noir (Labo) est maintenant débloqué.', 'success');
+        }
+      }, [totalValueComputed, portfolio, user]);
+
+      // VÉRIFICATION NOTIFICATIONS DE RENTABILITÉ ET SUCCÈS
+      useEffect(() => {
+        if (!portfolio || Object.keys(markets).length === 0) return;
+        const interval = setInterval(() => {
+           Object.keys(portfolio.assets).forEach(mId => {
+               const asset = portfolio.assets[mId];
+               const marketPrice = mId === 'm_longterm' ? aeternaPrice : markets[mId]?.price;
+               if (!marketPrice || !asset || asset.shares === 0 || asset.averageBuyPrice === 0) return;
+
+               const profitPercent = ((marketPrice - asset.averageBuyPrice) / asset.averageBuyPrice) * 100;
+
+               const thresholds = [20, 50, 100, 300, 1000];
+               thresholds.forEach(threshold => {
+                 const alertKey = `${mId}_${threshold}_${asset.averageBuyPrice.toFixed(2)}`;
+                 if (profitPercent >= threshold && !triggeredAlertsRef.current[alertKey]) {
+                    triggeredAlertsRef.current[alertKey] = true;
+                    const marketName = mId === 'm_longterm' ? 'Fonds Aeterna' : MARKETS_CONFIG[mId].name;
+                    addNotification(`Votre investissement sur ${marketName} a atteint +${threshold}% de rentabilité !`, 'success');
+                    playSound('claim');
+                 }
+               });
+           });
+        }, 2500);
+        return () => clearInterval(interval);
+      }, [portfolio, markets, aeternaPrice]);
 
       useEffect(() => {
         if (!user) return;
@@ -524,14 +593,10 @@
         return () => unsubLeaderboard();
       }, [user]);
 
-      // Compte à rebours du salaire journalier
       useEffect(() => {
         if (!portfolio) return;
         const updateTimer = () => {
-          if (!portfolio.lastRewardClaim) {
-            setTimeToReward(0);
-            return;
-          }
+          if (!portfolio.lastRewardClaim) { setTimeToReward(0); return; }
           const remaining = REWARD_COOLDOWN - (Date.now() - portfolio.lastRewardClaim);
           setTimeToReward(remaining > 0 ? remaining : 0);
         };
@@ -540,232 +605,215 @@
         return () => clearInterval(timerInterval);
       }, [portfolio?.lastRewardClaim]);
 
-      // COMPTEUR DE MINAGE/STAKING PASSIF EN TEMPS RÉEL
       useEffect(() => {
         if (!user || isLoading) return;
         const interval = setInterval(() => {
+          const maxLimit = portfolio?.upgrades?.whaleWallet ? 250 : MAX_STAKING_RESERVOIR;
           setStakingEarnings(prev => {
-            if (prev >= MAX_STAKING_RESERVOIR) return MAX_STAKING_RESERVOIR;
+            if (prev >= maxLimit) return maxLimit;
             return parseFloat((prev + STAKING_RATE).toFixed(2));
           });
         }, 1000);
         return () => clearInterval(interval);
-      }, [user, isLoading]);
+      }, [user, isLoading, portfolio?.upgrades?.whaleWallet]);
 
-      // Moteur de simulation (Market Maker Local pour les 3 marchés)
+      // MOTEUR DE SIMULATION AVEC ALERTES FLASH EN TEMPS RÉEL (BULL RUN & FLASH CRASH)
       useEffect(() => {
         if (!user) return;
-
         const intervalId = setInterval(async () => {
           const now = Date.now();
-          
           for (const mId of MARKET_IDS) {
             const currentMarket = marketsRefState.current[mId];
             if (!currentMarket) continue;
-
             const isLeader = currentMarket.leaderId === user.uid;
             const leaderIsDead = (now - (currentMarket.leaderHeartbeat || 0)) > 5000;
             const mRef = doc(db, 'artifacts', appId, 'public', 'data', 'markets', mId);
 
             if (leaderIsDead && !isLeader) {
-              await setDoc(mRef, { leaderId: user.uid, leaderHeartbeat: now }, { merge: true });
-              continue; 
+              await setDoc(mRef, { leaderId: user.uid, leaderHeartbeat: now }, { merge: true }); continue; 
             }
 
             if (isLeader) {
               const config = MARKETS_CONFIG[mId];
               const timeSinceLastUpdate = now - currentMarket.lastUpdate;
-              // Conversion du tickRate (0 = ~500ms, 1 = ~1000ms, 3 = ~2000ms)
               const targetDelay = config.tickRate === 0 ? 400 : (config.tickRate === 1 ? 900 : 1900);
-
-              // Le sentiment diminue (revient vers 0) progressivement au fil du temps
               let newSentiment = (currentMarket.sentimentScore || 0) * 0.85; 
               if (Math.abs(newSentiment) < 0.1) newSentiment = 0;
+
+              // GESTION DES EVENEMENTS FLASH CRASH / BULL RUN (RETENTION FORTE)
+              let activeEvent = currentMarket.flashEvent || null;
+              if (activeEvent && activeEvent.active && now >= activeEvent.endTime) {
+                // Fin de l'évènement
+                await setDoc(mRef, { flashEvent: deleteField() }, { merge: true });
+                activeEvent = null;
+              }
+
+              // Déclenchement aléatoire d'un évènement si aucun n'est actif (0,8% de chance par tick)
+              if (!activeEvent && Math.random() < 0.008) {
+                const eventType = Math.random() < 0.5 ? 'flash_crash' : 'bull_run';
+                activeEvent = {
+                  type: eventType,
+                  endTime: now + 45000, // Dure 45 secondes
+                  active: true
+                };
+                await setDoc(mRef, { flashEvent: activeEvent }, { merge: true });
+              }
 
               if (timeSinceLastUpdate > targetDelay) {
                 let newTrend = currentMarket.trend * 0.92;
                 let currentNews = currentMarket.news;
                 let currentNewsType = currentMarket.newsType;
 
-                newTrend += (Math.random() - 0.5) * config.vol;
+                // Application des multiplicateurs d'évènements flash
+                let eventFactor = 1.0;
+                let eventBias = 0.0;
+                if (activeEvent && activeEvent.active) {
+                  eventFactor = 2.5; // Volatilité multipliée par 2.5
+                  eventBias = activeEvent.type === 'bull_run' ? config.vol * 1.5 : -config.vol * 1.5;
+                }
+
+                newTrend += ((Math.random() - 0.5) * config.vol * eventFactor) + eventBias;
 
                 if (Math.random() < 0.05) {
                   const event = NEWS_EVENTS[Math.floor(Math.random() * NEWS_EVENTS.length)];
-                  newTrend += event.impact; // Applique l'impact (même s'il est gris)
-                  currentNews = event.text;
-                  currentNewsType = event.isGrey ? 'grey' : (event.impact > 0 ? 'positive' : 'negative');
+                  newTrend += event.impact; 
+                  currentNews = event.text; currentNewsType = event.isGrey ? 'grey' : (event.impact > 0 ? 'positive' : 'negative');
                 }
 
                 let newPrice = currentMarket.price + newTrend;
-                
-                if (newPrice <= 1.5) {
-                  newPrice = 1.5;
-                  newTrend = Math.abs(newTrend) + 1.0;
-                }
+                if (newPrice <= 1.5) { newPrice = 1.5; newTrend = Math.abs(newTrend) + 1.0; }
 
                 const newHistory = [...currentMarket.history, newPrice];
                 if (newHistory.length > 50) newHistory.shift();
 
                 try {
-                  await setDoc(mRef, {
-                    price: newPrice,
-                    history: newHistory,
-                    trend: newTrend,
-                    sentimentScore: newSentiment,
-                    news: currentNews,
-                    newsType: currentNewsType,
-                    lastUpdate: now,
-                    leaderHeartbeat: now
-                  }, { merge: true });
+                  await setDoc(mRef, { price: newPrice, history: newHistory, trend: newTrend, sentimentScore: newSentiment, news: currentNews, newsType: currentNewsType, lastUpdate: now, leaderHeartbeat: now }, { merge: true });
                 } catch (e) {}
               } else {
                 if (now - (currentMarket.leaderHeartbeat || 0) > 3000) {
-                  try { 
-                    await setDoc(mRef, { 
-                      leaderHeartbeat: now,
-                      sentimentScore: newSentiment // On met aussi à jour le sentiment même si pas de nouveau tick de prix
-                    }, { merge: true }); 
-                  } catch (e) {}
+                  try { await setDoc(mRef, { leaderHeartbeat: now, sentimentScore: newSentiment }, { merge: true }); } catch (e) {}
                 }
               }
             }
           }
-        }, 500); // Boucle générale toutes les 500ms
-
+        }, 500); 
         return () => clearInterval(intervalId);
       }, [user?.uid]);
 
-      // COLLECTE DE SALAIRE ET GESTION DE STREAK SUR FIREBASE
+      useEffect(() => {
+        if (!portfolio || !user) return;
+        let unlockedSomething = false;
+        const newAch = [...(portfolio.achievements || [])];
+        
+        const unlock = (id) => {
+          if (!newAch.includes(id)) { newAch.push(id); unlockedSomething = true; playSound('win'); addNotification(`Nouveau succès débloqué !`, 'success'); }
+        };
+
+        if (portfolio.assets && (portfolio.assets['m_medium']?.shares > 0 || portfolio.assets['m_fast']?.shares > 0 || portfolio.assets['m_slow']?.shares > 0)) unlock('first_trade');
+        if (totalValueComputed >= 50000) unlock('wealthy_1');
+        if (totalValueComputed >= 250000) unlock('wealthy_2');
+        if (totalValueComputed >= 1000000) unlock('millionaire');
+        if (portfolio.streak >= 7) unlock('loyal_trader');
+        if (portfolio.upgrades?.unlockedThemes?.length >= 2) unlock('collector');
+        if (portfolio.assets && portfolio.assets['m_medium']?.shares > 0 && portfolio.assets['m_fast']?.shares > 0 && portfolio.assets['m_slow']?.shares > 0) unlock('diversified');
+        if (portfolio.assets && portfolio.assets['m_longterm']?.shares >= 50) unlock('aeterna_vision');
+        if (portfolio.upgrades?.laboUnlocked) unlock('labo_initiate');
+
+        if (unlockedSomething) {
+          const portfolioRef = doc(db, 'artifacts', appId, 'users', user.uid, 'portfolio', 'state');
+          setDoc(portfolioRef, { achievements: newAch }, { merge: true });
+        }
+      }, [portfolio, user, totalValueComputed]);
+
+      const handleUnlockMarket = async (mId) => {
+        const cost = MARKETS_CONFIG[mId].unlockCost;
+        if (!portfolio || portfolio.balance < cost) { playSound('error'); return; }
+
+        const portfolioRef = doc(db, 'artifacts', appId, 'users', user.uid, 'portfolio', 'state');
+        const newUpgrades = { ...portfolio.upgrades };
+        if (!newUpgrades.unlockedMarkets) newUpgrades.unlockedMarkets = ['m_medium'];
+        if (!newUpgrades.unlockedMarkets.includes(mId)) {
+            newUpgrades.unlockedMarkets.push(mId);
+        }
+        const newBalance = portfolio.balance - cost;
+
+        playSound('buy_upgrade');
+        setPortfolio({ ...portfolio, balance: newBalance, upgrades: newUpgrades });
+        await setDoc(portfolioRef, { balance: newBalance, upgrades: newUpgrades }, { merge: true });
+      };
+
       const handleClaimReward = async () => {
         if (!user || !portfolio || timeToReward > 0) return;
         const portfolioRef = doc(db, 'artifacts', appId, 'users', user.uid, 'portfolio', 'state');
-        
         const now = Date.now();
-        const oneDayMs = 24 * 60 * 60 * 1000;
         const lastClaim = portfolio.lastRewardClaim || 0;
-        
         let newStreak = portfolio.streak || 1;
         
         if (lastClaim > 0) {
-          const delay = now - lastClaim;
-          if (delay < oneDayMs * 2) {
-            newStreak = Math.min(newStreak + 1, 7);
-          } else {
-            newStreak = 1;
-          }
-        } else {
-          newStreak = 1;
-        }
+          if (now - lastClaim < 24 * 60 * 60 * 1000 * 2) newStreak = Math.min(newStreak + 1, 7);
+          else newStreak = 1;
+        } else newStreak = 1;
 
-        const multiplier = 1 + (newStreak - 1) * 0.10;
-        const finalSalary = Math.round(REWARD_AMOUNT * multiplier);
-
+        const finalSalary = Math.round(REWARD_AMOUNT * (1 + (newStreak - 1) * 0.10));
         playSound('claim');
-
-        setPortfolio(prev => ({ 
-          ...prev, 
-          balance: prev.balance + finalSalary, 
-          lastRewardClaim: now,
-          streak: newStreak
-        }));
-
-        await setDoc(portfolioRef, { 
-          balance: portfolio.balance + finalSalary, 
-          lastRewardClaim: now,
-          streak: newStreak
-        }, { merge: true });
+        setPortfolio(prev => ({ ...prev, balance: prev.balance + finalSalary, lastRewardClaim: now, streak: newStreak }));
+        await setDoc(portfolioRef, { balance: portfolio.balance + finalSalary, lastRewardClaim: now, streak: newStreak }, { merge: true });
       };
 
-      // RÉCOLTE DU MINAGE PASSIF
       const handleClaimStaking = async () => {
         if (!user || !portfolio || stakingEarnings <= 0) return;
         const portfolioRef = doc(db, 'artifacts', appId, 'users', user.uid, 'portfolio', 'state');
-
         const collectedAmount = stakingEarnings;
-        setStakingEarnings(0); 
-
-        playSound('claim');
-
-        setPortfolio(prev => ({
-          ...prev,
-          balance: prev.balance + collectedAmount
-        }));
-
-        await setDoc(portfolioRef, {
-          balance: portfolio.balance + collectedAmount
-        }, { merge: true });
+        setStakingEarnings(0); playSound('claim');
+        setPortfolio(prev => ({ ...prev, balance: prev.balance + collectedAmount }));
+        await setDoc(portfolioRef, { balance: portfolio.balance + collectedAmount }, { merge: true });
       };
 
-      // --- LOGIQUE DE JEU DE LA ROULETTE DU CASINO ---
       const handleSpinRoulette = async () => {
-        if (isSpinning || !user || !portfolio) return;
-        if (rouletteBet <= 0 || rouletteBet > portfolio.balance) {
-          setRouletteStatusMessage("Mise invalide ou solde insuffisant !");
-          playSound('lose');
+        if (isSpinning || !user || !portfolio || rouletteBet <= 0 || rouletteBet > portfolio.balance) {
+          if(!isSpinning) { setRouletteStatusMessage("Mise invalide !"); playSound('error'); }
           return;
         }
+        setIsSpinning(true); setRouletteWinnerNum(null); setRouletteWinnerColor(null); setRouletteStatusMessage("Roue en rotation...");
 
-        setIsSpinning(true);
-        setRouletteWinnerNum(null);
-        setRouletteWinnerColor(null);
-        setRouletteStatusMessage("Roue en rotation...");
+        // Progression de la quête roulette
+        const currentDaily = portfolio.dailyQuests || { lastReset: Date.now(), tradesCount: 0, rouletteCount: 0, aeternaBought: 0, claimedToday: false };
+        const newDaily = {
+          ...currentDaily,
+          rouletteCount: currentDaily.rouletteCount + 1
+        };
 
         let ticksCount = 0;
-        const interval = setInterval(() => {
-          playSound('tick');
-          ticksCount++;
-          if (ticksCount >= 12) {
-            clearInterval(interval);
-          }
-        }, 120);
+        const interval = setInterval(() => { playSound('tick'); ticksCount++; if (ticksCount >= 12) clearInterval(interval); }, 120);
 
         setTimeout(async () => {
           const winningNumber = Math.floor(Math.random() * 37);
-          let winningColor = 'red';
-          
-          if (winningNumber === 0) {
-            winningColor = 'green';
-          } else if (
-            [2, 4, 6, 8, 10, 11, 13, 15, 17, 20, 22, 24, 26, 28, 29, 31, 33, 35].includes(winningNumber)
-          ) {
-            winningColor = 'black';
-          }
+          let winningColor = winningNumber === 0 ? 'green' : ([2, 4, 6, 8, 10, 11, 13, 15, 17, 20, 22, 24, 26, 28, 29, 31, 33, 35].includes(winningNumber) ? 'black' : 'red');
 
-          setRouletteWinnerNum(winningNumber);
-          setRouletteWinnerColor(winningColor);
+          setRouletteWinnerNum(winningNumber); setRouletteWinnerColor(winningColor);
 
           const portfolioRef = doc(db, 'artifacts', appId, 'users', user.uid, 'portfolio', 'state');
-          let winMultiplier = 0;
-          let won = false;
-
-          if (rouletteColor === winningColor) {
-            won = true;
-            winMultiplier = winningColor === 'green' ? 35 : 2;
-          }
+          let winMultiplier = 0; let won = false;
+          if (rouletteColor === winningColor) { won = true; winMultiplier = winningColor === 'green' ? 35 : 2; }
 
           let newBalance = portfolio.balance;
           if (won) {
-            const earnings = rouletteBet * (winMultiplier - 1);
-            newBalance += earnings;
-            setRouletteStatusMessage(`Gagné ! Le numéro ${winningNumber} (${winningColor.toUpperCase()}) est sorti. +$${earnings.toFixed(2)}`);
-            playSound('win');
+            const earnings = rouletteBet * (winMultiplier - 1); newBalance += earnings;
+            setRouletteStatusMessage(`Gagné ! +$${earnings.toFixed(2)}`); playSound('win');
           } else {
             newBalance -= rouletteBet;
-            setRouletteStatusMessage(`Perdu ! Le numéro ${winningNumber} (${winningColor.toUpperCase()}) est sorti. -$${rouletteBet.toFixed(2)}`);
-            playSound('lose');
+            setRouletteStatusMessage(`Perdu ! -$${rouletteBet.toFixed(2)}`); playSound('lose');
           }
 
-          setPortfolio(prev => ({ ...prev, balance: newBalance }));
-          await setDoc(portfolioRef, { balance: newBalance }, { merge: true });
+          setPortfolio(prev => ({ ...prev, balance: newBalance, dailyQuests: newDaily }));
+          await setDoc(portfolioRef, { balance: newBalance, dailyQuests: newDaily }, { merge: true });
           setIsSpinning(false);
         }, 1600);
       };
 
-      // TRADING D'ACTIONS (Frais 1% et pertes brutes x2)
       const handleTrade = async (type) => {
         const mId = activeMarketId;
         const currentMarket = markets[mId];
-        
         if (!currentMarket || !portfolio || !user) return;
 
         const mRef = doc(db, 'artifacts', appId, 'public', 'data', 'markets', mId);
@@ -773,84 +821,185 @@
 
         const currentPrice = currentMarket.price;
         let newBalance = portfolio.balance;
-        
         const activeAssets = portfolio.assets?.[mId] || { shares: 0, averageBuyPrice: 0 };
         let newShares = activeAssets.shares;
         let newAverageBuyPrice = activeAssets.averageBuyPrice;
-        
         let impactOnTrend = 0;
+        const feeRate = portfolio.upgrades?.diamondHands ? 0.005 : 0.01; 
+        const qty = tradeQuantity;
 
-        // --- DIFFICULTÉ : Frais remis à 1% ---
-        const feeRate = 0.01; 
+        let netProfit = 0;
+        let newStats = { ...(portfolio.stats || { totalProfit: 0, totalTrades: 0, winningTrades: 0, bestTrade: 0, worstTrade: 0, highestPortfolio: 10000, playTimeSeconds: 0 }) };
 
         if (type === 'BUY') {
-          const cost = currentPrice * (1 + feeRate);
+          const cost = currentPrice * qty * (1 + feeRate);
           if (portfolio.balance >= cost) {
-            newAverageBuyPrice = ((newShares * newAverageBuyPrice) + cost) / (newShares + 1);
-            newBalance -= cost;
-            newShares += 1;
-            impactOnTrend = 0.5 * (MARKETS_CONFIG[mId].vol / 2.5); 
+            newAverageBuyPrice = ((newShares * newAverageBuyPrice) + cost) / (newShares + qty);
+            newBalance -= cost; newShares += qty;
+            impactOnTrend = 0.5 * (MARKETS_CONFIG[mId].vol / 2.5) * qty; 
             playSound('claim');
-          } else {
-            playSound('lose');
-            return;
-          }
+          } else { playSound('error'); return; }
         } else if (type === 'SELL') {
-          if (newShares > 0) {
-            const gain = currentPrice * (1 - feeRate);
-            
-            // --- DIFFICULTÉ ACCRUE : Pertes brutes multipliées par 2 (CONSERVÉ) ---
+          if (newShares >= qty) {
+            const originalCost = activeAssets.averageBuyPrice * qty;
+            const gain = currentPrice * qty * (1 - feeRate);
             let penaltyLoss = 0;
-            if (currentPrice < newAverageBuyPrice) {
-              const rawLoss = newAverageBuyPrice - currentPrice;
-              penaltyLoss = rawLoss; 
+            if (currentPrice < newAverageBuyPrice) { 
+                const penaltyMult = portfolio.upgrades?.insiderTrading ? 1 : 4; 
+                penaltyLoss = (newAverageBuyPrice - currentPrice) * qty * penaltyMult; 
             }
+            netProfit = gain - originalCost - penaltyLoss;
+            newBalance += (gain - penaltyLoss); newShares -= qty;
+            impactOnTrend = -0.5 * (MARKETS_CONFIG[mId].vol / 2.5) * qty; 
+            if (newShares === 0) newAverageBuyPrice = 0;
+            if (penaltyLoss > 0) playSound('lose'); else playSound('win'); 
 
-            newBalance += (gain - penaltyLoss);
-            newShares -= 1;
-            impactOnTrend = -0.5 * (MARKETS_CONFIG[mId].vol / 2.5); 
-            
-            if (newShares === 0) {
-              newAverageBuyPrice = 0;
-            }
-
-            if (penaltyLoss > 0) {
-              playSound('lose'); 
+            // Mise à jour des stats du profil
+            newStats.totalTrades += 1;
+            if (netProfit > 0) {
+               newStats.winningTrades += 1;
+               newStats.totalProfit += netProfit;
+               if (netProfit > newStats.bestTrade) newStats.bestTrade = netProfit;
             } else {
-              playSound('win'); 
+               newStats.totalProfit += netProfit;
+               if (netProfit < newStats.worstTrade) newStats.worstTrade = netProfit;
             }
-          } else {
-            playSound('lose');
-            return;
-          }
+          } else { playSound('error'); return; }
         }
 
-        const newAssets = {
-          ...portfolio.assets,
-          [mId]: { shares: newShares, averageBuyPrice: newAverageBuyPrice }
+        let currentTxs = portfolio.transactions?.[mId] || [];
+        currentTxs.push({ type: type, price: currentPrice, time: Date.now() });
+        if (currentTxs.length > 20) currentTxs.shift();
+
+        const newTransactions = { ...portfolio.transactions, [mId]: currentTxs };
+        const newAssets = { ...portfolio.assets, [mId]: { shares: newShares, averageBuyPrice: newAverageBuyPrice } };
+
+        // Incrémentation quête daily trade
+        const currentDaily = portfolio.dailyQuests || { lastReset: Date.now(), tradesCount: 0, rouletteCount: 0, aeternaBought: 0, claimedToday: false };
+        const newDaily = {
+          ...currentDaily,
+          tradesCount: currentDaily.tradesCount + 1
         };
 
-        setPortfolio({ ...portfolio, balance: newBalance, assets: newAssets });
+        let payload = { balance: newBalance, assets: newAssets, transactions: newTransactions, dailyQuests: newDaily };
+        if (type === 'SELL') payload.stats = newStats;
 
-        await setDoc(portfolioRef, { 
-          balance: newBalance, 
-          assets: newAssets 
-        }, { merge: true });
+        setPortfolio({ ...portfolio, ...payload });
+        await setDoc(portfolioRef, payload, { merge: true });
 
-        // Mise à jour du marché avec l'impact ET le signal de Sentiment
-        const sentimentImpact = type === 'BUY' ? 3 : -3; // Impact fort pour se voir sur le front
+        const sentimentImpact = type === 'BUY' ? 3 * qty : -3 * qty;
+        await setDoc(mRef, { trend: currentMarket.trend + impactOnTrend, sentimentScore: (currentMarket.sentimentScore || 0) + sentimentImpact, lastUpdate: Date.now() }, { merge: true });
+      };
 
-        await setDoc(mRef, {
-          trend: currentMarket.trend + impactOnTrend,
-          sentimentScore: (currentMarket.sentimentScore || 0) + sentimentImpact,
-          lastUpdate: Date.now()
-        }, { merge: true });
+      // TRADING FONDS AETERNA (LONG TERME)
+      const handleTradeAeterna = async (type) => {
+        if (!portfolio || !user) return;
+        const portfolioRef = doc(db, 'artifacts', appId, 'users', user.uid, 'portfolio', 'state');
+        const currentPrice = aeternaPrice;
+        let newBalance = portfolio.balance;
+        const aeternaAssets = portfolio.assets?.['m_longterm'] || { shares: 0, averageBuyPrice: 0 };
+        let newShares = aeternaAssets.shares;
+        let newAverageBuyPrice = aeternaAssets.averageBuyPrice;
+        const qty = tradeQuantity;
+
+        // Incrémentation quête daily aeterna
+        const currentDaily = portfolio.dailyQuests || { lastReset: Date.now(), tradesCount: 0, rouletteCount: 0, aeternaBought: 0, claimedToday: false };
+        let newDaily = { ...currentDaily };
+        let netProfit = 0;
+        let newStats = { ...(portfolio.stats || { totalProfit: 0, totalTrades: 0, winningTrades: 0, bestTrade: 0, worstTrade: 0, highestPortfolio: 10000, playTimeSeconds: 0 }) };
+
+        if (type === 'BUY') {
+          // Frais d'entrée très élevés de 15% pour empêcher le Day Trading
+          const cost = currentPrice * qty * 1.15;
+          if (portfolio.balance >= cost) {
+            newAverageBuyPrice = ((newShares * newAverageBuyPrice) + cost) / (newShares + qty);
+            newBalance -= cost; newShares += qty;
+            newDaily.aeternaBought = currentDaily.aeternaBought + qty;
+            playSound('claim');
+          } else { playSound('error'); return; }
+        } else if (type === 'SELL') {
+          if (newShares >= qty) {
+            // 0% de frais de sortie
+            const originalCost = aeternaAssets.averageBuyPrice * qty;
+            const gain = currentPrice * qty;
+            netProfit = gain - originalCost;
+
+            newBalance += gain; newShares -= qty;
+            if (newShares === 0) newAverageBuyPrice = 0;
+            playSound('win');
+
+            // Mise à jour des stats du profil
+            newStats.totalTrades += 1;
+            if (netProfit > 0) {
+               newStats.winningTrades += 1;
+               newStats.totalProfit += netProfit;
+               if (netProfit > newStats.bestTrade) newStats.bestTrade = netProfit;
+            } else {
+               newStats.totalProfit += netProfit;
+               if (netProfit < newStats.worstTrade) newStats.worstTrade = netProfit;
+            }
+          } else { playSound('error'); return; }
+        }
+
+        const newAssets = { ...portfolio.assets, ['m_longterm']: { shares: newShares, averageBuyPrice: newAverageBuyPrice } };
+        let payload = { balance: newBalance, assets: newAssets, dailyQuests: newDaily };
+        if (type === 'SELL') payload.stats = newStats;
+
+        setPortfolio({ ...portfolio, ...payload });
+        await setDoc(portfolioRef, payload, { merge: true });
+      };
+
+      // RÉCLAMER LE JACKPOT DES DÉFIS QUOTIDIENS (+2 000$)
+      const handleClaimDailyJackpot = async () => {
+        if (!portfolio || !user) return;
+        const daily = portfolio.dailyQuests;
+        if (!daily || daily.tradesCount < 10 || daily.rouletteCount < 3 || daily.aeternaBought < 1 || daily.claimedToday) return;
+
+        const portfolioRef = doc(db, 'artifacts', appId, 'users', user.uid, 'portfolio', 'state');
+        const newBalance = portfolio.balance + 2000;
+        const newDaily = {
+          ...daily,
+          claimedToday: true
+        };
+
+        playSound('buy_upgrade');
+        setPortfolio({ ...portfolio, balance: newBalance, dailyQuests: newDaily });
+        await setDoc(portfolioRef, { balance: newBalance, dailyQuests: newDaily }, { merge: true });
       };
 
       const handleSetPseudo = async () => {
         if (!user || !pseudoInput.trim()) return;
         const portfolioRef = doc(db, 'artifacts', appId, 'users', user.uid, 'portfolio', 'state');
         await setDoc(portfolioRef, { pseudo: pseudoInput.trim() }, { merge: true });
+      };
+
+      const handleBuyUpgrade = async (upgradeId, cost, type = 'feature') => {
+        if (!portfolio || portfolio.balance < cost) { playSound('error'); return; }
+        
+        const portfolioRef = doc(db, 'artifacts', appId, 'users', user.uid, 'portfolio', 'state');
+        const newUpgrades = { ...portfolio.upgrades };
+        let newBalance = portfolio.balance - cost;
+
+        if (type === 'feature') {
+          newUpgrades[upgradeId] = true;
+        } else if (type === 'theme') {
+          if (!newUpgrades.unlockedThemes) newUpgrades.unlockedThemes = ['default'];
+          if (!newUpgrades.unlockedThemes.includes(upgradeId)) newUpgrades.unlockedThemes.push(upgradeId);
+          newUpgrades.theme = upgradeId; 
+        }
+
+        playSound('buy_upgrade');
+        setPortfolio({ ...portfolio, balance: newBalance, upgrades: newUpgrades });
+        await setDoc(portfolioRef, { balance: newBalance, upgrades: newUpgrades }, { merge: true });
+      };
+
+      const handleEquipTheme = async (themeId) => {
+        if (!portfolio || !portfolio.upgrades.unlockedThemes.includes(themeId)) return;
+        playSound('tick');
+        const portfolioRef = doc(db, 'artifacts', appId, 'users', user.uid, 'portfolio', 'state');
+        const newUpgrades = { ...portfolio.upgrades, theme: themeId };
+        setPortfolio({ ...portfolio, upgrades: newUpgrades });
+        await setDoc(portfolioRef, { upgrades: newUpgrades }, { merge: true });
       };
 
       const formatTime = (ms) => {
@@ -862,10 +1011,52 @@
         return `${h}h ${m}m ${s}s`;
       };
 
+      // --- COMPOSANT PROFIL STATISTIQUES ---
+      const StatsCard = ({ stats, isCurrentUser }) => {
+          const s = stats || {};
+          const totalTrades = s.totalTrades || 0;
+          const winRate = totalTrades > 0 ? Math.round(((s.winningTrades || 0) / totalTrades) * 100) : 0;
+          return (
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4">
+                 <div className="bg-black/30 p-3 sm:p-4 rounded-xl border border-white/5 shadow-sm">
+                     <p className="text-[9px] sm:text-[10px] opacity-60 uppercase font-bold tracking-wider mb-1">Profit Total</p>
+                     <p className={`font-mono text-base sm:text-xl font-bold truncate ${s.totalProfit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{s.totalProfit > 0 ? '+' : ''}{(s.totalProfit || 0).toLocaleString('fr-FR', {style: 'currency', currency: 'USD'})}</p>
+                 </div>
+                 <div className="bg-black/30 p-3 sm:p-4 rounded-xl border border-white/5 shadow-sm overflow-hidden">
+                     <p className="text-[9px] sm:text-[10px] opacity-60 uppercase font-bold tracking-wider mb-1">Trades</p>
+                     <p className="font-mono text-base sm:text-xl font-bold text-indigo-400 truncate">{totalTrades}</p>
+                 </div>
+                 <div className="bg-black/30 p-3 sm:p-4 rounded-xl border border-white/5 shadow-sm overflow-hidden">
+                     <p className="text-[9px] sm:text-[10px] opacity-60 uppercase font-bold tracking-wider mb-1 truncate">Taux de Réussite</p>
+                     <p className={`font-mono text-base sm:text-xl font-bold truncate ${winRate >= 50 ? 'text-emerald-400' : 'text-amber-400'}`}>{winRate}%</p>
+                 </div>
+                 <div className="bg-black/30 p-3 sm:p-4 rounded-xl border border-white/5 shadow-sm overflow-hidden">
+                     <p className="text-[9px] sm:text-[10px] opacity-60 uppercase font-bold tracking-wider mb-1">Meilleur Trade</p>
+                     <p className="font-mono text-base sm:text-xl font-bold text-emerald-400 truncate">+{(s.bestTrade || 0).toLocaleString('fr-FR', {style: 'currency', currency: 'USD'})}</p>
+                 </div>
+                 <div className="bg-black/30 p-3 sm:p-4 rounded-xl border border-white/5 shadow-sm overflow-hidden">
+                     <p className="text-[9px] sm:text-[10px] opacity-60 uppercase font-bold tracking-wider mb-1">Pire Trade</p>
+                     <p className="font-mono text-base sm:text-xl font-bold text-rose-400 truncate">{(s.worstTrade || 0).toLocaleString('fr-FR', {style: 'currency', currency: 'USD'})}</p>
+                 </div>
+                 <div className="bg-black/30 p-3 sm:p-4 rounded-xl border border-white/5 shadow-sm overflow-hidden">
+                     <p className="text-[9px] sm:text-[10px] opacity-60 uppercase font-bold tracking-wider mb-1">Max Portefeuille</p>
+                     <p className="font-mono text-base sm:text-xl font-bold text-amber-400 truncate">{(s.highestPortfolio || 10000).toLocaleString('fr-FR', {style: 'currency', currency: 'USD'})}</p>
+                 </div>
+                 <div className="bg-black/30 p-3 sm:p-4 rounded-xl border border-white/5 sm:col-span-3 shadow-sm flex items-center justify-between">
+                     <div className="overflow-hidden pr-2">
+                        <p className="text-[9px] sm:text-[10px] opacity-60 uppercase font-bold tracking-wider mb-1 truncate">Temps de Jeu Cumulé</p>
+                        <p className="font-mono text-base sm:text-xl font-bold text-zinc-300 truncate">{formatPlayTime(s.playTimeSeconds)}</p>
+                     </div>
+                     <Activity className={`w-8 h-8 opacity-20 shrink-0 ${isCurrentUser ? `text-${theme.primary}-500` : 'text-amber-500'}`} />
+                 </div>
+              </div>
+          );
+      };
+
       if (isLoading || Object.keys(markets).length < 3) {
         return (
           <div className="min-h-screen bg-[#09090b] flex items-center justify-center text-emerald-500 font-mono">
-            <Activity className="animate-spin w-8 h-8 mr-3" /> Chargement des Marchés...
+            <Activity className="animate-spin w-8 h-8 mr-3" /> Connexion au Marché...
           </div>
         );
       }
@@ -877,678 +1068,813 @@
       const priceDiff = activeMarket.price - activeMarket.history[0];
       const percentChange = (priceDiff / activeMarket.history[0]) * 100;
 
-      // NOUVEAU: Logique d'affichage du sentiment des joueurs
       const sentiment = activeMarket.sentimentScore || 0;
-      let sentimentText = "Neutre";
-      let SentimentIcon = Activity;
+      let sentimentText = "Neutre"; let SentimentIcon = Activity;
+      if (sentiment > 0.5) { sentimentText = "Achats majoritaires"; SentimentIcon = TrendingUp; } 
+      else if (sentiment < -0.5) { sentimentText = "Ventes majoritaires"; SentimentIcon = TrendingDown; }
 
-      if (sentiment > 0.5) {
-        sentimentText = "Achats majoritaires";
-        SentimentIcon = TrendingUp;
-      } else if (sentiment < -0.5) {
-        sentimentText = "Ventes majoritaires";
-        SentimentIcon = TrendingDown;
-      }
+      const currentThemeId = portfolio?.upgrades?.theme || 'default';
+      const theme = THEMES[currentThemeId] || THEMES['default'];
+
+      const dataToChart = portfolio?.upgrades?.extendedHistory ? activeMarket.history : activeMarket.history.slice(-25);
+      const aeternaAssets = portfolio.assets?.['m_longterm'] || { shares: 0, averageBuyPrice: 0 };
+
+      // VARIABLES DÉFIS QUOTIDIENS
+      const daily = portfolio?.dailyQuests || { tradesCount: 0, rouletteCount: 0, aeternaBought: 0, claimedToday: false };
+      const dailyCompleted = daily.tradesCount >= 10 && daily.rouletteCount >= 3 && daily.aeternaBought >= 1;
+
+      // VARIABLES VERROUILLAGE
+      const isMarketUnlocked = portfolio?.upgrades?.unlockedMarkets?.includes(activeMarketId);
+      const isLaboUnlocked = portfolio?.upgrades?.laboUnlocked;
+      const currentMaxStaking = portfolio?.upgrades?.whaleWallet ? 250 : MAX_STAKING_RESERVOIR;
+
+      // VARIABLES RECOMPENSES HEBDOMADAIRES (TOP 3)
+      const currentWeekId = Math.floor(Date.now() / (7 * 24 * 60 * 60 * 1000));
+      const myRank = leaderboard.findIndex(p => p.pseudo === portfolio?.pseudo);
+      const isTop3 = myRank >= 0 && myRank <= 2;
+      const hasClaimedWeekly = portfolio?.lastWeeklyClaim === currentWeekId;
+
+      const handleClaimWeeklyReward = async () => {
+        if (!user || !portfolio || hasClaimedWeekly || !isTop3) return;
+        const portfolioRef = doc(db, 'artifacts', appId, 'users', user.uid, 'portfolio', 'state');
+        
+        let reward = 0;
+        let title = '';
+        if (myRank === 0) { reward = 1000; title = 'champion_or'; }
+        else if (myRank === 1) { reward = 500; title = 'champion_argent'; }
+        else if (myRank === 2) { reward = 250; title = 'champion_bronze'; }
+
+        const newBalance = portfolio.balance + reward;
+        const newAch = [...(portfolio.achievements || [])];
+        if (!newAch.includes(title)) newAch.push(title);
+
+        playSound('win');
+        setPortfolio(prev => ({ ...prev, balance: newBalance, lastWeeklyClaim: currentWeekId, achievements: newAch }));
+        await setDoc(portfolioRef, { balance: newBalance, lastWeeklyClaim: currentWeekId, achievements: newAch }, { merge: true });
+      };
 
       return (
-        <div className="min-h-screen bg-[#09090b] text-zinc-100 font-sans selection:bg-emerald-500/30 pb-28">
+        <div className="max-w-7xl mx-auto pb-28 font-sans px-4 sm:px-6 relative">
           
-          <header className="border-b border-zinc-800 bg-[#09090b]/80 backdrop-blur-md sticky top-0 z-40">
-            <div className="max-w-6xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Globe className="w-5 h-5 sm:w-6 sm:h-6 text-emerald-400" />
-                <h1 className="text-lg sm:text-xl font-bold tracking-tight">TRADEX<span className="text-emerald-500">.LIVE</span></h1>
+          {/* TOAST NOTIFICATIONS */}
+          <div className="fixed top-16 left-4 right-4 sm:left-auto sm:top-20 sm:right-4 z-[100] flex flex-col gap-2 pointer-events-none sm:w-72">
+            {notifications.map(notif => (
+              <div key={notif.id} className={`p-3 rounded-lg shadow-lg border animate-in slide-in-from-right-8 fade-in duration-300 ${notif.type === 'success' ? 'bg-emerald-900/90 border-emerald-500 text-emerald-100 shadow-emerald-500/20' : 'bg-[#121214]/90 border-zinc-700 text-zinc-100'}`}>
+                <div className="flex items-start gap-3">
+                  {notif.type === 'success' ? <TrendingUp className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" /> : <Info className="w-5 h-5 text-blue-400 shrink-0 mt-0.5" />}
+                  <span className="text-xs sm:text-sm font-bold leading-tight drop-shadow-md">{notif.message}</span>
+                </div>
               </div>
-              
-              <div className="flex gap-2 sm:gap-6 text-sm items-center">
-                <div className="flex items-center gap-1.5 sm:gap-2 bg-zinc-900/80 px-2 sm:px-3 py-1.5 rounded-full border border-zinc-800" title="Traders en ligne">
-                  <span className="relative flex h-2 w-2">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+            ))}
+          </div>
+
+          <header className={`border-b ${theme.border} ${theme.bg}/80 backdrop-blur-md sticky top-0 z-40 transition-colors`}>
+            <div className="max-w-6xl mx-auto py-4 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Globe className={`w-5 h-5 text-${theme.primary}-400 shrink-0`} />
+                <h1 className="text-base sm:text-lg font-bold tracking-tight truncate">TRADEX<span className={`text-${theme.primary}-500`}>.LIVE</span></h1>
+              </div>
+              <div className="flex gap-2 sm:gap-6 text-sm items-center shrink-0">
+                <div className={`flex items-center gap-1.5 bg-black/40 px-3 py-1.5 rounded-full border ${theme.border}`}>
+                  <span className="relative flex h-2 w-2 shrink-0">
+                    <span className={`animate-ping absolute inline-flex h-full w-full rounded-full bg-${theme.primary}-400 opacity-75`}></span>
+                    <span className={`relative inline-flex rounded-full h-2 w-2 bg-${theme.primary}-500`}></span>
                   </span>
-                  <Users className="w-3.5 h-3.5 text-zinc-400" />
-                  <span className="font-mono text-xs sm:text-sm font-medium text-zinc-300">{onlineCount}</span>
+                  <Users className="w-3.5 h-3.5 opacity-60 shrink-0" />
+                  <span className="font-mono text-xs font-medium">{onlineCount}</span>
                 </div>
-
-                <div className="hidden sm:flex flex-col items-end border-l border-zinc-800 pl-3 sm:pl-6">
-                  <span className="text-[10px] sm:text-xs text-zinc-500 flex items-center gap-1"><Briefcase className="w-3.5 h-3.5"/> Portefeuille Global</span>
-                  <span className="font-mono text-sm sm:text-base font-medium">{totalValueComputed.toLocaleString('fr-FR', { style: 'currency', currency: 'USD' })}</span>
+                <div className={`hidden sm:flex flex-col items-end border-l ${theme.border} pl-6`}>
+                  <span className="text-[10px] uppercase font-bold opacity-60 flex items-center gap-1"><Briefcase className="w-3.5 h-3.5"/> Portefeuille Global</span>
+                  <span className="font-mono font-medium">{totalValueComputed.toLocaleString('fr-FR', { style: 'currency', currency: 'USD' })}</span>
                 </div>
-
-                <button 
-                  onClick={() => setShowInfo(true)} 
-                  className="p-1.5 sm:p-2 bg-zinc-800 hover:bg-zinc-700 rounded-full transition-colors"
-                  title="Comment jouer ?"
-                >
-                  <Info className="w-4 h-4 text-zinc-300" />
-                </button>
               </div>
             </div>
           </header>
 
-          <main className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
+          <main className="max-w-6xl mx-auto py-6 sm:py-8">
             
+            {/* BANDEAU EN DIRECT FLASH EVENT CRASH / BULL RUN AVEC BOUTON DE FERMETURE */}
+            {activeMarket.flashEvent && activeMarket.flashEvent.active && !dismissedEvents.includes(activeMarket.flashEvent.endTime) && (
+              <div className={`mb-4 py-2.5 sm:py-3 px-4 rounded-xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-lg transition-all ${
+                activeMarket.flashEvent.type === 'bull_run' 
+                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' 
+                  : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+              }`}>
+                <div className="flex items-center gap-3">
+                   <span className="relative flex h-2.5 w-2.5 shrink-0">
+                      <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${activeMarket.flashEvent.type === 'bull_run' ? 'bg-emerald-400' : 'bg-rose-400'}`}></span>
+                      <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${activeMarket.flashEvent.type === 'bull_run' ? 'bg-emerald-500' : 'bg-rose-500'}`}></span>
+                   </span>
+                   <p className="text-[11px] sm:text-xs font-black uppercase tracking-wider leading-snug">
+                      ⚠️ ALERTE : {activeMarket.flashEvent.type === 'bull_run' ? 'BULL RUN' : 'FLASH CRASH'} en cours sur {MARKETS_CONFIG[activeMarketId].name} ! Volatilité x2.5 !
+                   </p>
+                </div>
+                <div className="flex items-center gap-2 self-end sm:self-auto w-full sm:w-auto justify-end">
+                  <span className="text-[11px] font-mono font-bold bg-black/30 px-2 py-1 rounded-lg border border-white/5 shrink-0">
+                    {Math.max(0, Math.round((activeMarket.flashEvent.endTime - Date.now()) / 1000))}s
+                  </span>
+                  <button 
+                    onClick={() => setDismissedEvents(prev => [...prev, activeMarket.flashEvent.endTime])}
+                    className="p-1 hover:bg-white/10 rounded-full transition-colors text-current shrink-0"
+                    title="Fermer l'alerte"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* ONGLET TRADING */}
             {activeTab === 'trade' && (
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 sm:gap-8">
-                <div className="lg:col-span-2 space-y-4 sm:space-y-6">
-                  
-                  {/* SÉLECTEUR DES 3 MARCHÉS */}
-                  <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
-                    {MARKET_IDS.map(mId => (
-                      <button
-                        key={mId}
-                        onClick={() => setActiveMarketId(mId)}
-                        className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-bold whitespace-nowrap transition-all border ${
+              <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+                
+                <div className="flex gap-2 overflow-x-auto pb-4 scrollbar-hide">
+                  {MARKET_IDS.map(mId => {
+                    const isUnlocked = portfolio?.upgrades?.unlockedMarkets?.includes(mId);
+                    return (
+                      <button key={mId} onClick={() => setActiveMarketId(mId)}
+                        title={isUnlocked ? "" : `Débloquer pour ${MARKETS_CONFIG[mId].unlockCost.toLocaleString()}$`}
+                        className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-bold whitespace-nowrap transition-all border flex items-center gap-1.5 ${
                           activeMarketId === mId 
-                          ? 'bg-emerald-500 text-black border-emerald-400 shadow-lg shadow-emerald-500/20' 
-                          : 'bg-zinc-900/50 text-zinc-400 hover:bg-zinc-800 border-zinc-800'
+                          ? `bg-${theme.primary}-500 text-black border-${theme.primary}-400 shadow-lg shadow-${theme.primary}-500/20` 
+                          : `bg-black/20 hover:bg-black/40 ${theme.border}`
                         }`}
                       >
                         {MARKETS_CONFIG[mId].name}
+                        {!isUnlocked && <Lock className="w-3.5 h-3.5 opacity-60 shrink-0" />}
                       </button>
-                    ))}
-                  </div>
-
-                  <div className="flex flex-wrap justify-between items-end gap-3">
-                    <div>
-                      <p className="text-zinc-500 text-xs uppercase tracking-wider font-semibold">Tension du Marché ({MARKETS_CONFIG[activeMarketId].name})</p>
-                      <div className="flex items-baseline gap-2">
-                        <h2 className="text-3xl sm:text-5xl font-bold font-mono tracking-tighter">
-                          ${activeMarket.price.toFixed(2)}
-                        </h2>
-                        <span className={`flex items-center font-mono text-sm sm:text-lg ${isPositiveTrend ? 'text-emerald-400' : 'text-rose-400'}`}>
-                          {isPositiveTrend ? <TrendingUp className="w-3.5 h-3.5 sm:w-5 sm:h-5 mr-1" /> : <TrendingDown className="w-3.5 h-3.5 sm:w-5 sm:h-5 mr-1" />}
-                          {Math.abs(percentChange).toFixed(2)}%
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* NOUVEAU : PANNEAU SENTIMENT (ACTIVITÉ EN DIRECT DES JOUEURS) */}
-                    <div className={`flex flex-col items-center justify-center px-3 py-1.5 sm:px-4 sm:py-2 rounded-xl border bg-[#121214] shadow-sm mb-1 transition-colors duration-500 ${
-                       sentiment > 0.5 ? 'border-emerald-500/30 text-emerald-400' :
-                       sentiment < -0.5 ? 'border-rose-500/30 text-rose-400' :
-                       'border-zinc-700/50 text-zinc-400'
-                    }`}>
-                       <p className="text-[8px] sm:text-[9px] uppercase font-bold tracking-widest text-zinc-500 mb-0.5">Activité des Joueurs</p>
-                       <div className="flex items-center gap-1.5 font-semibold text-xs sm:text-sm">
-                          <SentimentIcon className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                          <span>{sentimentText}</span>
-                       </div>
-                    </div>
-                  </div>
-
-                  <div className="h-60 sm:h-80 lg:h-96 w-full bg-[#121214] border border-zinc-800 rounded-2xl p-4 shadow-2xl relative">
-                    <SparklineChart 
-                      data={activeMarket.history} 
-                      isPositive={isPositiveTrend} 
-                      averageBuyPrice={activeAssets.averageBuyPrice}
-                      sharesCount={activeAssets.shares}
-                    />
-                    <div className="absolute inset-0 pointer-events-none opacity-[0.03]" style={{ backgroundImage: 'linear-gradient(to right, #fff 1px, transparent 1px), linear-gradient(to bottom, #fff 1px, transparent 1px)', backgroundSize: '40px 40px' }}></div>
-                  </div>
-
-                  {/* BOÎTE ACTUALITÉ (AVEC LA LOGIQUE GRISÉE) */}
-                  <div className={`p-4 rounded-xl border flex items-start gap-3 sm:gap-4 transition-colors duration-500 ${
-                    activeMarket.newsType === 'positive' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-200' : 
-                    activeMarket.newsType === 'negative' ? 'bg-rose-500/10 border-rose-500/20 text-rose-200' : 
-                    activeMarket.newsType === 'grey' ? 'bg-zinc-400/10 border-zinc-500/30 text-zinc-300' : 
-                    'bg-zinc-800/50 border-zinc-700/50 text-zinc-300'
-                  }`}>
-                    {activeMarket.newsType === 'grey' ? (
-                      <HelpCircle className="w-5 h-5 shrink-0 mt-0.5 text-zinc-400" />
-                    ) : (
-                      <Zap className={`w-5 h-5 shrink-0 mt-0.5 ${activeMarket.newsType === 'positive' ? 'text-emerald-400' : activeMarket.newsType === 'negative' ? 'text-rose-400' : 'text-zinc-400'}`} />
-                    )}
-                    <div>
-                      <p className="text-[10px] uppercase font-bold opacity-70 mb-0.5">
-                        Dernière Actualité {activeMarket.newsType === 'grey' && "(Impact caché)"}
-                      </p>
-                      <p className="text-sm sm:text-base font-medium leading-snug">{activeMarket.news}</p>
-                    </div>
-                  </div>
+                    )
+                  })}
                 </div>
 
-                <div className="space-y-6">
-                  <div className="bg-[#121214] border border-zinc-800 rounded-2xl p-4 sm:p-6 shadow-xl">
-                    <h3 className="text-md sm:text-lg font-semibold mb-4 sm:text-left text-center flex items-center justify-center sm:justify-start gap-2 border-b border-zinc-800 pb-3">
-                      <DollarSign className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-500" /> Vos Fonds ({MARKETS_CONFIG[activeMarketId].name})
-                    </h3>
-                    
-                    <div className="space-y-3 mb-5">
-                      <div className="flex justify-between items-center bg-zinc-900/50 p-3 rounded-lg border border-zinc-800/50">
-                        <span className="text-xs sm:text-sm text-zinc-400">Liquidités (Global)</span>
-                        <span className="font-mono text-sm sm:text-lg font-bold">{portfolio.balance.toLocaleString('fr-FR', { style: 'currency', currency: 'USD' })}</span>
-                      </div>
-                      <div className="flex justify-between items-center bg-zinc-900/50 p-3 rounded-lg border border-zinc-800/50">
-                        <span className="text-xs sm:text-sm text-zinc-400">Actions sur ce marché</span>
-                        <span className="font-mono text-sm sm:text-lg font-bold text-blue-400">{activeAssets.shares} <span className="text-xs font-normal text-zinc-500">unités</span></span>
-                      </div>
-                      {activeAssets.shares > 0 && (
-                        <>
-                          <div className="flex justify-between items-center bg-zinc-900/50 p-3 rounded-lg border border-zinc-800/50">
-                            <span className="text-xs sm:text-sm text-zinc-400">Prix d'achat moyen (TTC)</span>
-                            <span className="font-mono text-xs sm:text-sm text-zinc-300">${(activeAssets.averageBuyPrice || 0).toFixed(2)}</span>
-                          </div>
-                          <div className="flex justify-between items-center bg-zinc-900/50 p-3 rounded-lg border border-zinc-800/50">
-                            <span className="text-xs sm:text-sm text-zinc-400">Gains / Pertes</span>
-                            <span className={`font-mono text-xs sm:text-sm ${activeMarket.price >= activeAssets.averageBuyPrice ? 'text-emerald-400' : 'text-rose-400'}`}>
-                              {activeMarket.price >= activeAssets.averageBuyPrice ? '+' : ''}{((activeMarket.price - activeAssets.averageBuyPrice) * activeAssets.shares).toFixed(2)}$
-                              <span className="text-[10px] ml-1 opacity-80">
-                                ({activeMarket.price >= activeAssets.averageBuyPrice ? '+' : ''}{activeAssets.averageBuyPrice > 0 ? (((activeMarket.price - activeAssets.averageBuyPrice) / activeAssets.averageBuyPrice) * 100).toFixed(2) : "0.00"}%)
-                              </span>
+                <div className="relative">
+                  {!isMarketUnlocked && (
+                     <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-[#09090b]/80 backdrop-blur-[3px] rounded-2xl border border-white/10 p-4 sm:p-6 text-center">
+                        <div className="p-4 bg-amber-500/20 rounded-full mb-4">
+                           <Lock className="w-10 h-10 text-amber-500" />
+                        </div>
+                        <h3 className="text-xl sm:text-2xl font-black text-white mb-2">Marché Verrouillé</h3>
+                        <p className="text-xs sm:text-sm text-zinc-400 mb-6 max-w-sm mx-auto">
+                           Débloquez l'entreprise <strong className="text-white">{MARKETS_CONFIG[activeMarketId].name}</strong> pour accéder à une nouvelle volatilité et diversifier vos investissements.
+                        </p>
+                        <button 
+                           onClick={() => handleUnlockMarket(activeMarketId)} 
+                           disabled={portfolio.balance < MARKETS_CONFIG[activeMarketId].unlockCost} 
+                           className="bg-amber-500 hover:bg-amber-400 text-black font-black py-3 px-6 sm:px-8 rounded-xl shadow-[0_0_15px_rgba(245,158,11,0.4)] transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap text-sm sm:text-base"
+                        >
+                           Débloquer ({MARKETS_CONFIG[activeMarketId].unlockCost.toLocaleString()}$)
+                        </button>
+                        {portfolio.balance < MARKETS_CONFIG[activeMarketId].unlockCost && (
+                            <p className="text-[11px] text-rose-400 mt-3 font-semibold">Fonds insuffisants</p>
+                        )}
+                     </div>
+                  )}
+
+                  <div className={`grid grid-cols-1 lg:grid-cols-3 gap-6 sm:gap-8 ${!isMarketUnlocked ? 'opacity-20 pointer-events-none blur-[2px] select-none transition-all duration-500' : 'transition-all duration-500'}`}>
+                    <div className="lg:col-span-2 space-y-4 sm:space-y-6">
+                      <div className="flex flex-wrap justify-between items-end gap-3">
+                        <div className="overflow-hidden pr-2">
+                          <p className="text-[10px] uppercase tracking-wider font-bold opacity-60 truncate">Marché : {MARKETS_CONFIG[activeMarketId].name}</p>
+                          <div className="flex items-baseline gap-2">
+                            <h2 className="text-4xl sm:text-5xl font-bold font-mono tracking-tighter truncate">
+                              ${activeMarket.price.toFixed(2)}
+                            </h2>
+                            <span className={`flex items-center font-mono text-sm sm:text-lg shrink-0 ${isPositiveTrend ? 'text-emerald-400' : 'text-rose-400'}`}>
+                              {isPositiveTrend ? <TrendingUp className="w-4 h-4 mr-1" /> : <TrendingDown className="w-4 h-4 mr-1" />}
+                              {Math.abs(percentChange).toFixed(2)}%
                             </span>
                           </div>
-                          {activeMarket.price < activeAssets.averageBuyPrice && (
-                            <div className="p-2 bg-rose-500/10 border border-rose-500/20 rounded-lg text-rose-400 text-[10px] leading-tight flex items-center gap-1">
-                              <AlertCircle className="w-3 h-3 shrink-0" />
-                              Attention : Vente à perte ! Pertes nettes doublées (x2).
-                            </div>
-                          )}
-                        </>
+                        </div>
+                        <div className={`flex flex-col items-center justify-center px-4 py-2 rounded-xl border ${theme.panel} shadow-sm shrink-0 ${
+                           sentiment > 0.5 ? 'border-emerald-500/30 text-emerald-400' : sentiment < -0.5 ? 'border-rose-500/30 text-rose-400' : `${theme.border} opacity-70`
+                        }`}>
+                           <p className="text-[9px] uppercase font-bold tracking-widest mb-0.5">Activité Joueurs</p>
+                           <div className="flex items-center gap-1.5 font-semibold text-xs sm:text-sm">
+                              <SentimentIcon className="w-4 h-4" /> <span>{sentimentText}</span>
+                           </div>
+                        </div>
+                      </div>
+
+                      {portfolio?.upgrades?.extendedHistory && (
+                         <div className={`flex items-center gap-3 p-2 rounded-lg border ${theme.border} bg-black/20 max-w-xs`}>
+                            <Maximize2 className="w-4 h-4 opacity-50 shrink-0" />
+                            <span className="text-[10px] uppercase font-bold opacity-60 shrink-0">Zoom Graphique</span>
+                            <input type="range" min="1" max="4" value={zoomLevel} onChange={(e) => setZoomLevel(Number(e.target.value))} className={`w-full accent-${theme.primary}-500`} />
+                            <span className="font-mono text-xs">{zoomLevel}x</span>
+                         </div>
                       )}
+
+                      <div className={`h-60 sm:h-80 lg:h-96 w-full ${theme.panel} border ${theme.border} rounded-2xl p-4 shadow-xl relative`}>
+                        <SparklineChart 
+                          data={dataToChart} 
+                          isPositive={isPositiveTrend} 
+                          averageBuyPrice={activeAssets.averageBuyPrice}
+                          sharesCount={activeAssets.shares}
+                          zoomLevel={zoomLevel}
+                          showMarkers={portfolio?.upgrades?.tradeMarkers}
+                          transactions={portfolio?.transactions?.[activeMarketId]}
+                          themeColor={theme.primary}
+                        />
+                        <div className="absolute inset-0 pointer-events-none opacity-[0.03]" style={{ backgroundImage: 'linear-gradient(to right, #fff 1px, transparent 1px), linear-gradient(to bottom, #fff 1px, transparent 1px)', backgroundSize: '40px 40px' }}></div>
+                      </div>
+
+                      <div className={`p-4 rounded-xl border flex items-start gap-4 transition-colors ${
+                        activeMarket.newsType === 'positive' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-200' : 
+                        activeMarket.newsType === 'negative' ? 'bg-rose-500/10 border-rose-500/20 text-rose-200' : 
+                        activeMarket.newsType === 'grey' ? 'bg-zinc-400/10 border-zinc-500/30 text-zinc-300' : 
+                        `${theme.panel} ${theme.border}`
+                      }`}>
+                        {activeMarket.newsType === 'grey' ? <HelpCircle className="w-5 h-5 shrink-0 mt-0.5 opacity-60" /> : <Zap className={`w-5 h-5 shrink-0 mt-0.5 ${activeMarket.newsType === 'positive' ? 'text-emerald-400' : activeMarket.newsType === 'negative' ? 'text-rose-400' : 'opacity-60'}`} />}
+                        <div>
+                          <p className="text-[10px] uppercase font-bold opacity-70 mb-0.5">Dernière Actualité {activeMarket.newsType === 'grey' && "(Impact caché)"}</p>
+                          <p className="text-sm font-medium leading-snug">{activeMarket.news}</p>
+                        </div>
+                      </div>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-3 sm:gap-4">
-                      <button
-                        onClick={() => handleTrade('BUY')}
-                        disabled={portfolio.balance < (activeMarket.price * 1.01)}
-                        className="relative overflow-hidden group bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-xl py-3 font-bold text-sm sm:text-base transition-all active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed flex flex-col items-center justify-center min-h-[50px]"
-                      >
-                        <div className="absolute inset-0 bg-gradient-to-t from-emerald-500/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                        ACHETER
-                        <span className="text-[9px] font-normal opacity-70">Frais: 1%</span>
-                      </button>
-                      
-                      <button
-                        onClick={() => handleTrade('SELL')}
-                        disabled={activeAssets.shares <= 0}
-                        className="relative overflow-hidden group bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-xl py-3 font-bold text-sm sm:text-base transition-all active:scale-95 disabled:opacity-30 disabled:cursor-not-allowed flex flex-col items-center justify-center min-h-[50px]"
-                      >
-                        <div className="absolute inset-0 bg-gradient-to-t from-rose-500/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                        VENDRE
-                        <span className="text-[9px] font-normal opacity-70">Frais: 1%</span>
-                      </button>
-                    </div>
+                    <div className="space-y-6">
+                      <div className={`${theme.panel} border ${theme.border} rounded-2xl p-5 shadow-xl`}>
+                        <div className="flex justify-between items-center mb-4 border-b border-white/10 pb-3">
+                            <h3 className="text-lg font-bold flex gap-2"><DollarSign className={`text-${theme.primary}-400 shrink-0`} /> <span className="truncate">Vos Fonds</span></h3>
+                            <div className="flex bg-black/40 rounded-lg p-1 border border-white/10 shrink-0">
+                                <button onClick={() => setTradeQuantity(1)} className={`px-3 py-1 rounded-md text-xs font-bold transition-all ${tradeQuantity === 1 ? `bg-${theme.primary}-500 text-black` : 'text-zinc-500 hover:text-white'}`}>x1</button>
+                                <button onClick={() => setTradeQuantity(10)} className={`px-3 py-1 rounded-md text-xs font-bold transition-all ${tradeQuantity === 10 ? `bg-${theme.primary}-500 text-black` : 'text-zinc-500 hover:text-white'}`}>x10</button>
+                            </div>
+                        </div>
+                        
+                        <div className="space-y-3 mb-5">
+                          <div className="flex justify-between items-center bg-black/30 p-3 rounded-lg border border-white/5">
+                            <span className="text-[11px] sm:text-xs opacity-70">Liquidités</span>
+                            <span className="font-mono text-base sm:text-lg font-bold truncate pl-2">{portfolio.balance.toLocaleString('fr-FR', { style: 'currency', currency: 'USD' })}</span>
+                          </div>
+                          <div className="flex justify-between items-center bg-black/30 p-3 rounded-lg border border-white/5">
+                            <span className="text-[11px] sm:text-xs opacity-70 truncate pr-2">Actions ({MARKETS_CONFIG[activeMarketId].name})</span>
+                            <span className="font-mono font-bold text-blue-400">{activeAssets.shares}</span>
+                          </div>
+                          {activeAssets.shares > 0 && (
+                            <>
+                              <div className="flex justify-between items-center bg-black/30 p-3 rounded-lg border border-white/5">
+                                <span className="text-[11px] sm:text-xs opacity-70">Prix d'achat</span>
+                                <span className="font-mono text-sm">${(activeAssets.averageBuyPrice || 0).toFixed(2)}</span>
+                              </div>
+                              <div className="flex justify-between items-center bg-black/30 p-3 rounded-lg border border-white/5">
+                                <span className="text-[11px] sm:text-xs opacity-70">Gains / Pertes</span>
+                                <span className={`font-mono text-sm truncate pl-2 ${activeMarket.price >= activeAssets.averageBuyPrice ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                  {activeMarket.price >= activeAssets.averageBuyPrice ? '+' : ''}{((activeMarket.price - activeAssets.averageBuyPrice) * activeAssets.shares).toFixed(2)}$
+                                </span>
+                              </div>
+                              {activeMarket.price < activeAssets.averageBuyPrice && (
+                                <div className="p-2 bg-rose-500/10 border border-rose-500/20 rounded-lg text-rose-400 text-[10px] flex items-center gap-1.5 leading-tight">
+                                  <AlertCircle className="w-4 h-4 shrink-0" /> Attention ! Vente à perte (Perte x{portfolio.upgrades?.insiderTrading ? '2' : '5'}).
+                                </div>
+                              )}
+                            </>
+                          )}
+                        </div>
 
-                    <p className="text-[10px] text-zinc-600 mt-5 text-center flex items-center justify-center gap-1">
-                      <AlertCircle className="w-3.5 h-3.5 shrink-0" /> Vos actions influencent légèrement le cours.
-                    </p>
+                        <div className="grid grid-cols-2 gap-3 sm:gap-4">
+                          <button onClick={() => handleTrade('BUY')} disabled={portfolio.balance < (activeMarket.price * tradeQuantity * (1 + (portfolio.upgrades?.diamondHands ? 0.005 : 0.01)))} className="group bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-xl py-3 font-bold flex flex-col items-center disabled:opacity-30 transition-all active:scale-95 text-xs sm:text-sm">
+                            ACHETER x{tradeQuantity} <span className="text-[9px] font-normal opacity-70 mt-1">Frais: {portfolio.upgrades?.diamondHands ? '0.5%' : '1%'}</span>
+                          </button>
+                          <button onClick={() => handleTrade('SELL')} disabled={activeAssets.shares < tradeQuantity} className="group bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-xl py-3 font-bold flex flex-col items-center disabled:opacity-30 transition-all active:scale-95 text-xs sm:text-sm">
+                            VENDRE x{tradeQuantity} <span className="text-[9px] font-normal opacity-70 mt-1">Frais: {portfolio.upgrades?.diamondHands ? '0.5%' : '1%'}</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </div>
+
+                {/* MODULE AETERNA (LONG TERME) */}
+                <div className="mt-8 p-5 sm:p-6 rounded-2xl bg-gradient-to-br from-[#1a1305] to-[#0a0802] border border-amber-500/30 shadow-[0_0_20px_rgba(245,158,11,0.15)] relative overflow-hidden">
+                   <div className="absolute top-0 right-0 w-64 h-64 bg-amber-500/10 rounded-full blur-3xl pointer-events-none"></div>
+                   <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4 border-b border-amber-500/20 pb-4 relative z-10">
+                      <div>
+                         <h3 className="text-xl font-black text-amber-400 flex items-center gap-2"><Lock className="w-5 h-5 shrink-0"/> Fonds Aeterna</h3>
+                         <p className="text-[11px] sm:text-xs text-amber-200/80 mt-1 max-w-xl leading-relaxed">
+                            Garantit une croissance algorithmique de <strong className="text-amber-400">+1% toutes les 24h</strong> à l'infini. Idéal pour l'investissement passif sur plusieurs semaines. <br/>
+                            <span className="text-rose-400 font-bold">Frais d'entrée : 15%</span> (Prévoyez ~15 jours pour redevenir rentable).
+                         </p>
+                      </div>
+                      <div className="text-left md:text-right shrink-0">
+                         <span className="text-[10px] sm:text-xs uppercase font-bold text-amber-500/60 block">Valeur Actuelle (1 part)</span>
+                         <span className="text-2xl sm:text-3xl font-mono font-black text-amber-400 drop-shadow-[0_0_5px_rgba(245,158,11,0.5)]">${aeternaPrice.toFixed(2)}</span>
+                      </div>
+                   </div>
+
+                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6 relative z-10">
+                       <div className="bg-black/60 border border-amber-500/20 p-4 rounded-xl">
+                           <div className="flex justify-between items-center mb-3 text-xs sm:text-sm">
+                               <span className="text-amber-200/60">Vos parts Aeterna</span>
+                               <span className="font-mono text-lg sm:text-xl font-black text-amber-400">{aeternaAssets.shares}</span>
+                           </div>
+                           <div className="flex justify-between items-center mb-3 text-xs sm:text-sm">
+                               <span className="text-amber-200/60">Prix d'achat moyen</span>
+                               <span className="font-mono text-zinc-300">${(aeternaAssets.averageBuyPrice || 0).toFixed(2)}</span>
+                           </div>
+                           <div className="flex justify-between items-center pt-2 border-t border-amber-500/10 text-xs sm:text-sm">
+                               <span className="text-amber-200/60">Gains latents</span>
+                               {aeternaAssets.shares > 0 ? (
+                                   <span className={`font-mono font-bold truncate pl-2 ${aeternaPrice >= aeternaAssets.averageBuyPrice ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                       {aeternaPrice >= aeternaAssets.averageBuyPrice ? '+' : ''}
+                                       {((aeternaPrice - aeternaAssets.averageBuyPrice) * aeternaAssets.shares).toFixed(2)}$
+                                   </span>
+                               ) : <span className="font-mono text-zinc-500">0.00$</span>}
+                           </div>
+                       </div>
+
+                       <div className="flex flex-col justify-center gap-3">
+                           <div className="flex gap-3">
+                               <button onClick={() => handleTradeAeterna('BUY')} disabled={portfolio.balance < (aeternaPrice * tradeQuantity * 1.15)} className="flex-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-400 border border-amber-500/50 py-3 rounded-xl font-bold transition-all active:scale-95 disabled:opacity-30 flex flex-col items-center shadow-[0_0_10px_rgba(245,158,11,0.1)] text-xs sm:text-sm">
+                                   ACHETER x{tradeQuantity}
+                                   <span className="text-[9px] opacity-70 font-normal mt-1">Coût: {(aeternaPrice * tradeQuantity * 1.15).toFixed(2)}$</span>
+                               </button>
+                               <button onClick={() => handleTradeAeterna('SELL')} disabled={aeternaAssets.shares < tradeQuantity} className="flex-1 bg-black/40 hover:bg-amber-500/10 text-amber-400 border border-amber-500/30 py-3 rounded-xl font-bold transition-all active:scale-95 disabled:opacity-30 flex flex-col items-center text-xs sm:text-sm">
+                                   VENDRE x{tradeQuantity}
+                                   <span className="text-[9px] opacity-70 font-normal mt-1">Gain: {(aeternaPrice * tradeQuantity).toFixed(2)}$</span>
+                               </button>
+                           </div>
+                           {aeternaPrice < aeternaAssets.averageBuyPrice && aeternaAssets.shares > 0 && (
+                               <p className="text-[10px] text-center text-rose-400 font-semibold bg-rose-500/10 py-1.5 px-2 rounded-lg border border-rose-500/20">Investissement encore en perte (Frais de 15%). Revenez dans quelques jours !</p>
+                           )}
+                       </div>
+                   </div>
+                </div>
+
               </div>
             )}
 
-            {/* --- ONGLET BONUS, RÉCOMPENSES & MINI-CASINO --- */}
+            {/* ONGLET RÉCOMPENSES & DÉFIS QUOTIDIENS */}
             {activeTab === 'rewards' && (
-              <div className="max-w-4xl mx-auto space-y-8">
-                
+              <div className="max-w-4xl mx-auto space-y-6 sm:space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   
-                  {/* MODULE A: SALAIRE JOURNALIER & STREAK */}
-                  <div className="bg-[#121214] border border-indigo-500/20 rounded-2xl p-5 sm:p-6 relative overflow-hidden flex flex-col justify-between">
+                  <div className={`${theme.panel} border ${theme.border} rounded-2xl p-5 sm:p-6 relative overflow-hidden flex flex-col justify-between shadow-xl`}>
                     <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-indigo-500 to-purple-500"></div>
-                    
                     <div>
-                      <div className="flex items-center justify-between mb-4">
-                        <h3 className="text-lg font-bold flex items-center gap-2 text-indigo-400">
-                          <Gift className="w-5 h-5" /> Salaire Journalier
-                        </h3>
-                        <div className="flex items-center gap-1 bg-amber-500/10 text-amber-400 px-2 py-0.5 rounded-full border border-amber-500/20 text-xs font-semibold">
-                          <Flame className="w-3.5 h-3.5 fill-amber-500" /> Série: {portfolio.streak || 1} {portfolio.streak > 1 ? 'jours' : 'jour'}
+                      <div className="flex justify-between items-center mb-4">
+                        <h3 className="text-lg font-bold flex gap-2 text-indigo-400"><Gift className="shrink-0" /> Salaire Journalier</h3>
+                        <div className="flex items-center gap-1 bg-amber-500/10 text-amber-400 px-2 py-0.5 rounded-full border border-amber-500/20 text-xs font-semibold shrink-0">
+                          <Flame className="w-3.5 h-3.5" /> Série: {portfolio.streak || 1}
                         </div>
                       </div>
-
-                      <p className="text-xs sm:text-sm text-zinc-400 mb-4">
-                        Revenez chaque jour pour augmenter votre multiplicateur de salaire ! À 7 jours consécutifs, vous gagnez un bonus permanent de <strong>+70%</strong>.
-                      </p>
-
-                      {/* Échelles de la série de jours */}
-                      <div className="grid grid-cols-7 gap-1 sm:gap-2 mb-6 text-center">
-                        {[1, 2, 3, 4, 5, 6, 7].map((day) => {
-                          const isCompleted = day <= (portfolio.streak || 1);
-                          return (
-                            <div key={day} className="flex flex-col items-center">
-                              <span className="text-[8px] sm:text-[10px] text-zinc-500 block mb-1">J{day}</span>
-                              <div className={`w-full aspect-square rounded-lg flex items-center justify-center font-mono text-xs font-bold border transition-all ${
-                                isCompleted 
-                                ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500' 
-                                : 'bg-zinc-900 text-zinc-600 border-zinc-800'
-                              }`}>
-                                +{day === 1 ? '0' : (day - 1) * 10}%
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
+                      <p className="text-[11px] sm:text-xs opacity-70 mb-6">Revenez chaque jour. À 7 jours consécutifs, gagnez un bonus permanent de +70%.</p>
                     </div>
-
                     <div className="space-y-4">
-                      <div className="bg-zinc-950 p-3 sm:p-4 rounded-xl border border-zinc-800/60 flex items-center justify-between">
+                      <div className="bg-black/30 p-3 sm:p-4 rounded-xl border border-white/5 flex justify-between">
                         <div>
-                          <span className="text-[10px] uppercase font-bold text-zinc-500 block">Salaire calculé</span>
-                          <span className="font-mono text-lg font-bold text-white">
-                            +${Math.round(REWARD_AMOUNT * (1 + ((portfolio.streak || 1) - 1) * 0.10))}
-                          </span>
+                          <span className="text-[10px] uppercase font-bold opacity-60">Calculé</span>
+                          <span className="font-mono text-base sm:text-lg font-bold block mt-1 truncate">+${Math.round(REWARD_AMOUNT * (1 + ((portfolio.streak || 1) - 1) * 0.10))}</span>
                         </div>
                         <div className="text-right">
-                          <span className="text-[10px] uppercase font-bold text-zinc-500 block">Statut</span>
-                          {timeToReward === 0 ? (
-                            <span className="text-xs text-emerald-400 font-semibold flex items-center gap-1 justify-end"><span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-ping"></span> Prêt</span>
-                          ) : (
-                            <span className="text-xs text-zinc-400 font-mono">{formatTime(timeToReward)}</span>
-                          )}
+                          <span className="text-[10px] uppercase font-bold opacity-60">Statut</span>
+                          {timeToReward === 0 ? <span className="text-xs text-emerald-400 font-semibold flex items-center gap-1 justify-end mt-1.5"><span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-ping"></span> Prêt</span> : <span className="text-xs font-mono mt-1 block truncate">{formatTime(timeToReward)}</span>}
                         </div>
                       </div>
-
-                      <button
-                        onClick={handleClaimReward}
-                        disabled={timeToReward > 0}
-                        className={`w-full py-3.5 rounded-xl font-bold text-sm sm:text-base transition-all ${
-                          timeToReward === 0 
-                          ? 'bg-indigo-500 hover:bg-indigo-600 text-white shadow-lg active:scale-95 cursor-pointer' 
-                          : 'bg-zinc-900 text-zinc-500 border border-zinc-800 cursor-not-allowed'
-                        }`}
-                      >
-                        {timeToReward === 0 ? 'Réclamer mon salaire' : 'Compte à rebours activé'}
+                      <button onClick={handleClaimReward} disabled={timeToReward > 0} className={`w-full py-3 sm:py-3.5 rounded-xl font-bold text-sm transition-all ${timeToReward === 0 ? 'bg-indigo-500 hover:bg-indigo-600 text-white shadow-lg active:scale-95' : 'bg-black/50 text-white/30 border border-white/10 cursor-not-allowed'}`}>
+                        {timeToReward === 0 ? 'Réclamer mon salaire' : 'Patientez'}
                       </button>
                     </div>
                   </div>
 
-                  {/* MODULE B: MINAGE / STAKING D'INTÉRÊTS ACTIFS */}
-                  <div className="bg-[#121214] border border-emerald-500/20 rounded-2xl p-5 sm:p-6 relative overflow-hidden flex flex-col justify-between">
-                    <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-500 to-teal-500"></div>
-                    
+                  <div className={`${theme.panel} border ${theme.border} rounded-2xl p-5 sm:p-6 relative overflow-hidden flex flex-col justify-between shadow-xl`}>
+                    <div className={`absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-${theme.primary}-500 to-teal-500`}></div>
                     <div>
-                      <div className="flex items-center justify-between mb-4">
-                        <h3 className="text-lg font-bold flex items-center gap-2 text-emerald-400">
-                          <Coins className="w-5 h-5 animate-bounce" /> Générateur d'Intérêts
-                        </h3>
-                        <span className="text-[10px] bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded-full border border-emerald-500/20 font-bold">
-                          ACTIF EN DIRECT
-                        </span>
-                      </div>
-
-                      <p className="text-xs sm:text-sm text-zinc-400 mb-6">
-                        Tant que cette page reste ouverte sur votre écran, vous générez passivement des liquidités à hauteur de <strong>$0.05 par seconde</strong>. Récoltez régulièrement vos gains avant que le réservoir ne soit plein !
-                      </p>
-
-                      {/* Réservoir graphique */}
-                      <div className="bg-zinc-950 p-4 rounded-xl border border-zinc-800 flex items-center justify-between gap-4 mb-6">
-                        <div className="w-full bg-zinc-900 rounded-full h-4 overflow-hidden relative border border-zinc-800">
-                          <div 
-                            className="bg-gradient-to-r from-emerald-500 to-teal-400 h-full transition-all duration-1000 ease-out" 
-                            style={{ width: `${(stakingEarnings / MAX_STAKING_RESERVOIR) * 100}%` }}
-                          />
-                          <span className="absolute inset-0 flex items-center justify-center text-[10px] font-bold font-mono text-zinc-300">
-                            {((stakingEarnings / MAX_STAKING_RESERVOIR) * 100).toFixed(0)}% rempli
-                          </span>
+                      <h3 className={`text-lg font-bold flex gap-2 text-${theme.primary}-400 mb-4`}><Coins className="animate-bounce shrink-0"/> Générateur Passif</h3>
+                      <p className="text-[11px] sm:text-xs opacity-70 mb-6">Générez $0.05 par seconde pendant que l'app est ouverte (Max ${currentMaxStaking}).</p>
+                      <div className="bg-black/30 p-3 sm:p-4 rounded-xl border border-white/5 flex items-center justify-between gap-4 mb-6">
+                        <div className="w-full bg-black/50 rounded-full h-4 overflow-hidden relative border border-white/10">
+                          <div className={`bg-gradient-to-r from-${theme.primary}-500 to-teal-400 h-full transition-all duration-1000`} style={{ width: `${(stakingEarnings / currentMaxStaking) * 100}%` }}/>
                         </div>
-                        <span className="font-mono text-xl font-extrabold text-emerald-400 w-24 text-right">
-                          ${stakingEarnings.toFixed(2)}
-                        </span>
+                        <span className={`font-mono text-lg sm:text-xl font-extrabold text-${theme.primary}-400 w-20 sm:w-24 text-right truncate`}>${stakingEarnings.toFixed(2)}</span>
                       </div>
                     </div>
-
-                    <div className="space-y-3">
-                      <p className="text-[10px] text-zinc-500 text-center">
-                        Capacité maximale du réservoir : <strong>${MAX_STAKING_RESERVOIR.toFixed(2)}</strong>
-                      </p>
-                      
-                      <button
-                        onClick={handleClaimStaking}
-                        disabled={stakingEarnings <= 0}
-                        className={`w-full py-3.5 rounded-xl font-bold text-sm sm:text-base transition-all ${
-                          stakingEarnings > 0 
-                          ? 'bg-emerald-500 hover:bg-emerald-600 text-black shadow-lg active:scale-95 cursor-pointer' 
-                          : 'bg-zinc-900 text-zinc-500 border border-zinc-800 cursor-not-allowed'
-                        }`}
-                      >
-                        {stakingEarnings > 0 ? 'Récolter les gains accumulés' : 'Aucun gain disponible'}
-                      </button>
-                    </div>
-                  </div>
-
-                </div>
-
-                {/* --- MODULE NOUVEAU: MINI JEU CASINO (LA ROULETTE) --- */}
-                <div className="bg-[#121214] border border-amber-500/20 rounded-2xl p-5 sm:p-6 relative overflow-hidden">
-                  <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-amber-500 to-orange-500"></div>
-                  
-                  <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4 border-b border-zinc-800 pb-4">
-                    <div className="flex items-center gap-2">
-                      <Dices className="w-6 h-6 text-amber-400 animate-spin" style={{ animationDuration: '6s' }} />
-                      <div>
-                        <h3 className="text-lg font-bold text-amber-400">Mini-Casino : La Roulette</h3>
-                        <p className="text-xs text-zinc-400">Tentez de multiplier vos liquidités instantanément !</p>
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <span className="text-xs text-zinc-500 block">Vos Liquidités</span>
-                      <span className="font-mono text-base font-bold text-emerald-400">${portfolio.balance.toLocaleString('fr-FR', { minimumFractionDigits: 2 })}</span>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                    {/* Zone de paris */}
-                    <div className="lg:col-span-7 space-y-4">
-                      {/* 1. Sélection du montant */}
-                      <div>
-                        <label className="text-xs text-zinc-400 uppercase font-semibold tracking-wider block mb-2">Choisir la mise ($)</label>
-                        <div className="grid grid-cols-5 gap-1 sm:gap-2">
-                          {[50, 100, 500, 1000].map((val) => (
-                            <button
-                              key={val}
-                              onClick={() => { playSound('tick'); setRouletteBet(val); }}
-                              disabled={isSpinning}
-                              className={`py-2 px-1 rounded-lg text-xs font-mono font-bold transition-all border ${
-                                rouletteBet === val 
-                                ? 'bg-amber-500/20 border-amber-500 text-amber-300' 
-                                : 'bg-zinc-900 hover:bg-zinc-800 border-zinc-800 text-zinc-400'
-                              }`}
-                            >
-                              ${val}
-                            </button>
-                          ))}
-                          <button
-                            onClick={() => { playSound('tick'); setRouletteBet(Math.floor(portfolio.balance)); }}
-                            disabled={isSpinning}
-                            className={`py-2 px-1 rounded-lg text-[10px] font-bold uppercase transition-all border ${
-                              rouletteBet === Math.floor(portfolio.balance)
-                              ? 'bg-amber-500/20 border-amber-500 text-amber-300' 
-                              : 'bg-zinc-900 hover:bg-zinc-800 border-zinc-800 text-zinc-400'
-                            }`}
-                          >
-                            All-in
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Input de mise manuelle */}
-                      <div className="flex items-center bg-zinc-950 px-3 py-1 rounded-xl border border-zinc-800">
-                        <span className="text-zinc-500 text-sm mr-2">$</span>
-                        <input
-                          type="number"
-                          disabled={isSpinning}
-                          value={rouletteBet}
-                          onChange={(e) => {
-                            const val = Math.max(0, parseInt(e.target.value) || 0);
-                            setRouletteBet(val);
-                          }}
-                          className="bg-transparent text-white font-mono font-bold text-sm focus:outline-none w-full"
-                          min="1"
-                        />
-                      </div>
-
-                      {/* 2. Sélection de la cible de pari */}
-                      <div>
-                        <label className="text-xs text-zinc-400 uppercase font-semibold tracking-wider block mb-2">Parier sur la couleur</label>
-                        <div className="grid grid-cols-3 gap-3">
-                          <button
-                            onClick={() => { playSound('tick'); setRouletteColor('red'); }}
-                            disabled={isSpinning}
-                            className={`py-3 rounded-xl font-bold text-xs flex flex-col items-center gap-1 border transition-all ${
-                              rouletteColor === 'red'
-                              ? 'bg-rose-600 text-white border-white scale-105 shadow-lg shadow-rose-900/30'
-                              : 'bg-[#1e1114] text-rose-400 border-rose-950 hover:bg-[#251418]'
-                            }`}
-                          >
-                            <span className="w-3 h-3 bg-rose-600 rounded-full border border-white"></span>
-                            Rouge (x2)
-                          </button>
-
-                          <button
-                            onClick={() => { playSound('tick'); setRouletteColor('black'); }}
-                            disabled={isSpinning}
-                            className={`py-3 rounded-xl font-bold text-xs flex flex-col items-center gap-1 border transition-all ${
-                              rouletteColor === 'black'
-                              ? 'bg-zinc-800 text-white border-white scale-105 shadow-lg shadow-black'
-                              : 'bg-[#111113] text-zinc-400 border-zinc-900 hover:bg-[#18181b]'
-                            }`}
-                          >
-                            <span className="w-3 h-3 bg-zinc-950 rounded-full border border-zinc-700"></span>
-                            Noir (x2)
-                          </button>
-
-                          <button
-                            onClick={() => { playSound('tick'); setRouletteColor('green'); }}
-                            disabled={isSpinning}
-                            className={`py-3 rounded-xl font-bold text-xs flex flex-col items-center gap-1 border transition-all ${
-                              rouletteColor === 'green'
-                              ? 'bg-emerald-600 text-white border-white scale-105 shadow-lg shadow-emerald-950/30'
-                              : 'bg-[#0f1915] text-emerald-400 border-emerald-950 hover:bg-[#13211b]'
-                            }`}
-                          >
-                            <span className="w-3 h-3 bg-emerald-600 rounded-full border border-white animate-pulse"></span>
-                            Vert / Le 0 (x35)
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Zone de tirage visuel */}
-                    <div className="lg:col-span-5 bg-zinc-950 rounded-xl p-4 flex flex-col justify-between items-center border border-zinc-800 relative">
-                      <div className="text-center w-full">
-                        <p className="text-[10px] uppercase font-extrabold tracking-widest text-zinc-500 mb-1">RÉSOLUTION ROULETTE</p>
-                        
-                        {/* Roue roulette simplifiée animée */}
-                        <div className="h-32 w-full flex items-center justify-center relative overflow-hidden bg-zinc-900 border border-zinc-800 rounded-lg my-3">
-                          {isSpinning ? (
-                            <div className="flex gap-1 animate-pulse">
-                              <span className="w-4 h-4 rounded-full bg-rose-500 animate-bounce" style={{ animationDelay: '0.1s' }}></span>
-                              <span className="w-4 h-4 rounded-full bg-zinc-100 animate-bounce" style={{ animationDelay: '0.2s' }}></span>
-                              <span className="w-4 h-4 rounded-full bg-emerald-500 animate-bounce" style={{ animationDelay: '0.3s' }}></span>
-                            </div>
-                          ) : rouletteWinnerNum !== null ? (
-                            <div className="flex flex-col items-center animate-scaleIn">
-                              <div className={`w-16 h-16 rounded-full flex items-center justify-center font-mono text-2xl font-black border-2 shadow-2xl ${
-                                rouletteWinnerColor === 'red' ? 'bg-rose-600 border-rose-400 shadow-rose-900/40 text-white' : 
-                                rouletteWinnerColor === 'black' ? 'bg-zinc-800 border-zinc-600 shadow-black text-white' : 
-                                'bg-emerald-600 border-emerald-400 shadow-emerald-900/40 text-white'
-                              }`}>
-                                {rouletteWinnerNum}
-                              </div>
-                              <span className="text-[10px] uppercase font-bold text-zinc-400 mt-2">
-                                Couleur : {rouletteWinnerColor === 'red' ? 'Rouge' : rouletteWinnerColor === 'black' ? 'Noir' : 'Vert (Zéro)'}
-                              </span>
-                            </div>
-                          ) : (
-                            <p className="text-xs text-zinc-500 font-mono italic">Prêt pour la rotation</p>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Message statut */}
-                      <div className="text-center mb-4">
-                        <p className={`text-xs font-semibold leading-relaxed px-2 py-1.5 rounded-lg ${
-                          rouletteStatusMessage.includes("Gagné") ? 'text-emerald-400 bg-emerald-500/10' :
-                          rouletteStatusMessage.includes("Perdu") ? 'text-rose-400 bg-rose-500/10' :
-                          'text-zinc-300'
-                        }`}>
-                          {rouletteStatusMessage}
-                        </p>
-                      </div>
-
-                      <button
-                        onClick={handleSpinRoulette}
-                        disabled={isSpinning || portfolio.balance < rouletteBet || rouletteBet <= 0}
-                        className={`w-full py-3.5 rounded-xl font-bold text-sm sm:text-base transition-all ${
-                          !isSpinning && portfolio.balance >= rouletteBet && rouletteBet > 0
-                          ? 'bg-amber-500 hover:bg-amber-600 text-black shadow-lg shadow-amber-950/20 active:scale-95 cursor-pointer' 
-                          : 'bg-zinc-900 text-zinc-500 border border-zinc-800 cursor-not-allowed'
-                        }`}
-                      >
-                        {isSpinning ? "Lancement..." : "Faire tourner la roue"}
-                      </button>
-                    </div>
+                    <button onClick={handleClaimStaking} disabled={stakingEarnings <= 0} className={`w-full py-3 sm:py-3.5 rounded-xl font-bold text-sm transition-all ${stakingEarnings > 0 ? `bg-${theme.primary}-500 hover:bg-${theme.primary}-600 text-black shadow-lg active:scale-95` : 'bg-black/50 text-white/30 border border-white/10 cursor-not-allowed'}`}>
+                      {stakingEarnings > 0 ? 'Récolter' : 'Vide'}
+                    </button>
                   </div>
                 </div>
 
+                {/* BLOC DES DÉFIS QUOTIDIENS */}
+                <div className={`${theme.panel} border border-amber-500/20 rounded-2xl p-5 sm:p-6 shadow-xl relative overflow-hidden`}>
+                   <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-amber-500 to-orange-500"></div>
+                   <div className="flex justify-between items-center border-b border-white/10 pb-3 mb-4 flex-wrap gap-2">
+                      <h4 className="text-sm sm:text-base uppercase font-black text-amber-400 flex items-center gap-2"><Sparkles className="w-4 h-4 sm:w-5 sm:h-5 shrink-0"/> Objectifs du Jour</h4>
+                      <span className="text-[10px] sm:text-xs font-mono bg-amber-500/10 px-2 sm:px-3 py-1 rounded-full text-amber-400 border border-amber-500/20 whitespace-nowrap">Jackpot : +$2,000</span>
+                   </div>
+                   
+                   <div className="space-y-4">
+                      <div>
+                         <div className="flex justify-between items-center text-[11px] sm:text-sm mb-1.5">
+                            <span className="opacity-80">🎯 Trades effectués aujourd'hui</span>
+                            <span className="font-mono font-bold text-amber-300">{daily.tradesCount} / 10</span>
+                         </div>
+                         <div className="w-full bg-black/40 h-2 sm:h-2.5 rounded-full overflow-hidden">
+                            <div className="bg-amber-500 h-full transition-all duration-500" style={{ width: `${Math.min(100, (daily.tradesCount / 10) * 100)}%` }}></div>
+                         </div>
+                      </div>
+
+                      <div>
+                         <div className="flex justify-between items-center text-[11px] sm:text-sm mb-1.5">
+                            <span className="opacity-80">🎲 Lancements de roulette</span>
+                            <span className="font-mono font-bold text-amber-300">{daily.rouletteCount} / 3</span>
+                         </div>
+                         <div className="w-full bg-black/40 h-2 sm:h-2.5 rounded-full overflow-hidden">
+                            <div className="bg-amber-500 h-full transition-all duration-500" style={{ width: `${Math.min(100, (daily.rouletteCount / 3) * 100)}%` }}></div>
+                         </div>
+                      </div>
+
+                      <div>
+                         <div className="flex justify-between items-center text-[11px] sm:text-sm mb-1.5">
+                            <span className="opacity-80">⏳ Achats de parts Fonds Aeterna</span>
+                            <span className="font-mono font-bold text-amber-300">{daily.aeternaBought} / 1</span>
+                         </div>
+                         <div className="w-full bg-black/40 h-2 sm:h-2.5 rounded-full overflow-hidden mb-3">
+                            <div className="bg-amber-500 h-full transition-all duration-500" style={{ width: `${Math.min(100, (daily.aeternaBought / 1) * 100)}%` }}></div>
+                         </div>
+                      </div>
+
+                      {dailyCompleted && !daily.claimedToday ? (
+                         <button onClick={handleClaimDailyJackpot} className="w-full py-3 sm:py-3.5 bg-gradient-to-r from-amber-500 to-orange-500 text-black font-black uppercase text-xs sm:text-sm rounded-xl shadow-lg shadow-amber-500/25 animate-pulse transition-transform active:scale-95">
+                            Réclamer le Jackpot du jour (+$2,000)
+                         </button>
+                      ) : daily.claimedToday ? (
+                         <div className="text-center py-2 sm:py-3 text-amber-400/80 font-black border border-amber-500/30 bg-amber-500/5 rounded-xl text-xs sm:text-sm">
+                            Félicitations ! Jackpot quotidien récupéré.
+                         </div>
+                      ) : (
+                         <div className="text-center py-2 sm:py-3 text-zinc-500 font-bold bg-black/20 rounded-xl text-[10px] sm:text-xs border border-white/5 px-2">
+                            Complétez tous les défis pour débloquer le coffre !
+                         </div>
+                      )}
+                   </div>
+                </div>
+
+                {/* BLOC DES RÉCOMPENSES DE CLASSEMENT (NOUVEAU) */}
+                <div className={`${theme.panel} border border-yellow-500/20 rounded-2xl p-5 sm:p-6 shadow-xl relative overflow-hidden mt-6`}>
+                   <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-yellow-400 to-amber-600"></div>
+                   <div className="flex justify-between items-center border-b border-white/10 pb-3 mb-4 flex-wrap gap-2">
+                      <h4 className="text-sm sm:text-base uppercase font-black text-yellow-400 flex items-center gap-2"><Trophy className="w-4 h-4 sm:w-5 sm:h-5 shrink-0"/> Prime de Classement</h4>
+                      <span className="text-[10px] sm:text-xs font-mono bg-yellow-500/10 px-2 sm:px-3 py-1 rounded-full text-yellow-400 border border-yellow-500/20 whitespace-nowrap">Top 3 Uniquement</span>
+                   </div>
+                   
+                   <p className="text-xs sm:text-sm text-zinc-400 mb-5 leading-relaxed">
+                      Maintenez votre place dans le <strong className="text-white">Top 3 mondial</strong> en fin de semaine pour débloquer des liquidités bonus et une médaille honorifique permanente !
+                   </p>
+
+                   {isTop3 && !hasClaimedWeekly ? (
+                     <button onClick={handleClaimWeeklyReward} className="w-full py-3 sm:py-3.5 bg-gradient-to-r from-yellow-400 to-amber-500 text-black font-black uppercase text-xs sm:text-sm rounded-xl shadow-lg shadow-yellow-500/25 animate-pulse transition-transform active:scale-95">
+                        Réclamer ma récompense (Rang #{myRank + 1})
+                     </button>
+                   ) : hasClaimedWeekly ? (
+                     <div className="text-center py-2 sm:py-3 text-yellow-400/80 font-black border border-yellow-500/30 bg-yellow-500/5 rounded-xl text-xs sm:text-sm">
+                        Récompense de la semaine récupérée !
+                     </div>
+                   ) : (
+                     <div className="text-center py-2 sm:py-3 text-zinc-500 font-bold bg-black/20 rounded-xl text-[10px] sm:text-xs border border-white/5 px-2">
+                        Atteignez le Top 3 pour débloquer. Actuel: {myRank >= 0 ? `#${myRank + 1}` : 'Non classé'}
+                     </div>
+                   )}
+                </div>
+
+                <div className={`${theme.panel} border border-amber-500/20 rounded-2xl p-5 sm:p-6 shadow-xl`}>
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 mb-6 border-b border-white/10 pb-4">
+                    <h3 className="text-lg font-bold text-amber-400 flex gap-2 items-center"><Dices className="animate-spin shrink-0" style={{ animationDuration: '6s' }} /> La Roulette</h3>
+                    <div className="text-left sm:text-right"><span className="text-[11px] sm:text-xs opacity-60">Fonds : </span><span className="font-mono font-bold text-emerald-400 truncate pl-1">${portfolio.balance.toFixed(2)}</span></div>
+                  </div>
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    <div className="space-y-4">
+                      <div className="flex bg-black/40 px-3 py-2 rounded-xl border border-white/10 focus-within:border-amber-500 transition-colors">
+                        <span className="text-amber-500 mr-2 font-bold mt-0.5">$</span>
+                        <input type="number" disabled={isSpinning} value={rouletteBet} onChange={(e) => setRouletteBet(Math.max(0, parseInt(e.target.value) || 0))} className="bg-transparent font-mono font-bold w-full outline-none text-base" min="1"/>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2 sm:gap-3">
+                        <button onClick={() => setRouletteColor('red')} disabled={isSpinning} className={`py-2 sm:py-3 rounded-xl font-bold text-[10px] sm:text-xs flex flex-col items-center gap-1 border transition-all ${rouletteColor === 'red' ? 'bg-rose-600 border-white text-white scale-105 shadow-lg shadow-rose-900' : 'bg-black/40 border-rose-950 text-rose-500'}`}><span className="w-3 h-3 bg-rose-500 rounded-full"></span>Rouge <span className="font-normal">(x2)</span></button>
+                        <button onClick={() => setRouletteColor('black')} disabled={isSpinning} className={`py-2 sm:py-3 rounded-xl font-bold text-[10px] sm:text-xs flex flex-col items-center gap-1 border transition-all ${rouletteColor === 'black' ? 'bg-zinc-800 border-white text-white scale-105 shadow-lg' : 'bg-black/40 border-zinc-800 text-zinc-500'}`}><span className="w-3 h-3 bg-black border border-white/20 rounded-full"></span>Noir <span className="font-normal">(x2)</span></button>
+                        <button onClick={() => setRouletteColor('green')} disabled={isSpinning} className={`py-2 sm:py-3 rounded-xl font-bold text-[10px] sm:text-xs flex flex-col items-center gap-1 border transition-all ${rouletteColor === 'green' ? 'bg-emerald-600 border-white text-white scale-105 shadow-lg shadow-emerald-900' : 'bg-black/40 border-emerald-950 text-emerald-500'}`}><span className="w-3 h-3 bg-emerald-500 rounded-full"></span>Vert <span className="font-normal">(x35)</span></button>
+                      </div>
+                    </div>
+                    <div className="bg-black/30 border border-white/10 rounded-xl p-4 flex flex-col justify-center items-center">
+                      <div className="h-20 sm:h-24 w-full flex items-center justify-center bg-black/50 border border-white/5 rounded-lg mb-4">
+                        {isSpinning ? <div className="animate-pulse flex gap-2"><span className="w-3 h-3 bg-rose-500 rounded-full"></span><span className="w-3 h-3 bg-zinc-400 rounded-full"></span><span className="w-3 h-3 bg-emerald-500 rounded-full"></span></div> : rouletteWinnerNum !== null ? <div className="flex flex-col items-center"><div className={`w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center rounded-full text-lg sm:text-xl font-bold border-2 text-white ${rouletteWinnerColor==='red'?'bg-rose-600 border-rose-400':rouletteWinnerColor==='black'?'bg-zinc-800 border-zinc-500':'bg-emerald-600 border-emerald-400'}`}>{rouletteWinnerNum}</div></div> : <span className="text-[11px] sm:text-xs opacity-50 font-mono">Faites vos jeux</span>}
+                      </div>
+                      <p className={`text-[11px] sm:text-xs font-semibold mb-4 text-center truncate w-full ${rouletteStatusMessage.includes("Gagné") ? 'text-emerald-400' : rouletteStatusMessage.includes("Perdu") ? 'text-rose-400' : 'opacity-70'}`}>{rouletteStatusMessage}</p>
+                      <button onClick={handleSpinRoulette} disabled={isSpinning || portfolio.balance < rouletteBet} className="w-full bg-amber-500 hover:bg-amber-600 text-black py-2.5 sm:py-3 rounded-xl font-bold transition-all disabled:opacity-30 disabled:cursor-not-allowed text-xs sm:text-sm">Lancer la roue</button>
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
 
+            {/* ONGLET CLASSEMENT */}
             {activeTab === 'leaderboard' && (
-              <div className="max-w-2xl mx-auto mt-4">
+              <div className="max-w-2xl mx-auto mt-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
                 {!portfolio?.pseudo ? (
-                  <div className="bg-[#121214] border border-zinc-800 rounded-2xl p-6 sm:p-8 shadow-xl text-center">
-                    <Trophy className="w-16 h-16 text-amber-500 mx-auto mb-5" />
-                    <h3 className="text-2xl font-bold mb-3">Rejoindre le Classement</h3>
-                    <p className="text-zinc-400 text-xs sm:text-sm mb-6 max-w-md mx-auto">
-                      Pour apparaître dans le top des meilleurs traders mondiaux, choisis un pseudo unique. Ce choix est définitif.
-                    </p>
-                    
-                    <div className="flex flex-col sm:flex-row gap-3 max-w-sm mx-auto">
-                      <input 
-                        type="text" 
-                        maxLength="15" 
-                        value={pseudoInput} 
-                        onChange={e => setPseudoInput(e.target.value)} 
-                        placeholder="Ton pseudo..." 
-                        className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 font-medium" 
-                      />
-                      <button 
-                        onClick={handleSetPseudo} 
-                        disabled={!pseudoInput.trim()}
-                        className="bg-amber-500 hover:bg-amber-600 disabled:opacity-50 disabled:hover:bg-amber-500 text-black font-bold py-3 px-6 rounded-xl text-sm transition-colors whitespace-nowrap"
-                      >
-                        Valider
-                      </button>
+                  <div className="bg-[#1a1305] border border-amber-500/30 rounded-2xl p-6 sm:p-8 shadow-[0_0_20px_rgba(245,158,11,0.15)] text-center">
+                    <Trophy className="w-12 h-12 sm:w-16 sm:h-16 text-amber-500 mx-auto mb-4 drop-shadow-[0_0_10px_rgba(245,158,11,0.5)]" />
+                    <h3 className="text-xl sm:text-2xl font-black mb-2 text-amber-400">Rejoignez le Classement</h3>
+                    <p className="text-[11px] sm:text-xs text-amber-200/70 mb-6 px-2">Définissez un pseudo pour comparer vos performances mondiales.</p>
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <input type="text" value={pseudoInput} onChange={(e) => setPseudoInput(e.target.value)} placeholder="Votre pseudo..." className="flex-1 bg-black/60 border border-amber-500/30 text-amber-100 rounded-xl px-4 py-3 outline-none focus:border-amber-400 transition-colors placeholder:text-amber-700/50 text-sm" maxLength="15" />
+                      <button onClick={handleSetPseudo} className="bg-amber-500 hover:bg-amber-400 text-[#1a1305] font-black px-6 py-3 rounded-xl transition-all shadow-[0_0_15px_rgba(245,158,11,0.4)] text-sm whitespace-nowrap">Valider</button>
                     </div>
                   </div>
                 ) : (
-                  <div className="bg-[#121214] border border-zinc-800 rounded-2xl shadow-xl overflow-hidden">
-                    <div className="p-4 sm:p-6 border-b border-zinc-800 flex justify-between items-center bg-zinc-900/30">
-                      <h3 className="text-base sm:text-xl font-bold flex items-center gap-2">
-                        <Trophy className="text-amber-500 w-5 h-5 sm:w-6 sm:h-6"/> 
-                        Top 50 Mondial
-                      </h3>
-                      <div className="text-right text-xs">
-                        <p className="text-zinc-500">Pseudo</p>
-                        <p className="font-bold text-amber-400 truncate max-w-[100px] sm:max-w-[150px]">{portfolio.pseudo}</p>
-                      </div>
-                    </div>
-                    
-                    <div className="p-2 max-h-[60vh] overflow-y-auto">
-                      {leaderboard.length === 0 ? (
-                        <p className="text-zinc-500 text-center py-10 text-sm">Calcul des scores en cours...</p>
-                      ) : (
-                        <div className="space-y-1">
-                          {leaderboard.map((player, index) => {
-                            const profit = player.totalValue - 10000;
-                            const isMe = player.pseudo === portfolio.pseudo;
-                            
-                            return (
-                              <div key={index} className={`flex justify-between items-center p-3 sm:p-4 rounded-xl transition-colors ${isMe ? 'bg-amber-500/10 border border-amber-500/20' : 'hover:bg-zinc-900/50 border border-transparent'}`}>
-                                <div className="flex items-center gap-2 sm:gap-4 overflow-hidden">
-                                  <span className={`font-mono font-bold text-sm sm:text-base w-6 sm:w-8 shrink-0 text-center ${index === 0 ? 'text-amber-400' : index === 1 ? 'text-zinc-300' : index === 2 ? 'text-amber-700' : 'text-zinc-600'}`}>
-                                    #{index + 1}
-                                  </span>
-                                  <span className={`font-bold text-xs sm:text-sm truncate ${isMe ? 'text-amber-400' : 'text-zinc-200'}`}>
-                                    {player.pseudo}
-                                  </span>
-                                </div>
-                                <div className="text-right shrink-0 ml-2">
-                                  <p className="font-mono font-bold text-xs sm:text-sm text-zinc-100">${player.totalValue.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</p>
-                                  <p className={`text-[10px] sm:text-xs font-mono font-medium ${profit >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
-                                    {profit >= 0 ? '+' : ''}{profit.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}$
-                                  </p>
-                                </div>
-                              </div>
-                            )
-                          })}
+                  <div className="bg-[#1a1305] border border-amber-500/30 rounded-2xl p-4 sm:p-6 shadow-[0_0_20px_rgba(245,158,11,0.1)] relative overflow-hidden">
+                    <div className="absolute top-0 right-0 w-64 h-64 bg-amber-500/10 rounded-full blur-3xl pointer-events-none"></div>
+                    <h3 className="text-lg sm:text-xl font-black flex items-center gap-2 mb-6 border-b border-amber-500/20 pb-4 text-amber-400">
+                      <Trophy className="w-5 h-5 sm:w-6 sm:h-6 text-amber-400 drop-shadow-[0_0_5px_rgba(245,158,11,0.8)]" /> Classement Mondial
+                    </h3>
+                    <div className="space-y-2 sm:space-y-3 relative z-10">
+                      {leaderboard.map((player, index) => (
+                        <div key={index} onClick={() => setSelectedPlayer(player)} className={`flex items-center justify-between p-3 sm:p-4 rounded-xl border transition-all cursor-pointer hover:scale-[1.02] ${player.pseudo === portfolio.pseudo ? 'bg-amber-500/20 border-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.2)]' : 'bg-black/40 border-amber-900/30 hover:border-amber-500/50'}`}>
+                          <div className="flex items-center gap-3 sm:gap-4 overflow-hidden pr-2 flex-1">
+                            <span className={`font-mono font-black text-sm sm:text-lg w-6 sm:w-8 text-center shrink-0 ${index === 0 ? 'text-amber-300 drop-shadow-[0_0_5px_rgba(253,230,138,0.8)]' : index === 1 ? 'text-zinc-300' : index === 2 ? 'text-amber-700' : 'text-amber-900/80'}`}>
+                              #{index + 1}
+                            </span>
+                            <span className={`font-bold text-xs sm:text-sm truncate ${player.pseudo === portfolio.pseudo ? 'text-amber-300' : 'text-amber-100/90'}`}>
+                              {player.pseudo}
+                            </span>
+                          </div>
+                          <span className={`font-mono text-xs sm:text-base font-black shrink-0 pl-2 ${player.pseudo === portfolio.pseudo ? 'text-amber-400' : 'text-amber-500/80'}`}>
+                            {player.totalValue.toLocaleString('fr-FR', { style: 'currency', currency: 'USD' })}
+                          </span>
                         </div>
-                      )}
+                      ))}
                     </div>
                   </div>
+                )}
+              </div>
+            )}
+
+            {/* ONGLET PROFIL */}
+            {activeTab === 'profile' && (
+               <div className="max-w-3xl mx-auto space-y-6 sm:space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                  <div className={`${theme.panel} border ${theme.border} rounded-2xl p-6 sm:p-8 shadow-xl relative overflow-hidden`}>
+                     <div className={`absolute top-0 right-0 w-64 h-64 bg-${theme.primary}-500/5 rounded-full blur-3xl pointer-events-none`}></div>
+                     
+                     <div className="flex items-center gap-5 mb-8 border-b border-white/10 pb-6 relative z-10">
+                        <div className={`w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-${theme.primary}-500/20 border border-${theme.primary}-500/50 flex items-center justify-center text-${theme.primary}-400 shadow-[0_0_15px_rgba(16,185,129,0.2)] shrink-0`}>
+                           <User className="w-8 h-8 sm:w-10 sm:h-10" />
+                        </div>
+                        <div className="overflow-hidden">
+                           <h2 className="text-2xl sm:text-3xl font-black mb-1 truncate">{portfolio?.pseudo || "Trader Anonyme"}</h2>
+                           <p className="text-xs sm:text-sm opacity-60 font-mono tracking-wider truncate">ID: {user?.uid.substring(0,8)}...{user?.uid.substring(user.uid.length - 4)}</p>
+                        </div>
+                     </div>
+
+                     <div className="relative z-10">
+                        <h3 className={`text-lg sm:text-xl font-black mb-5 flex items-center gap-2 text-${theme.primary}-400`}>
+                           <Activity className="w-5 h-5 shrink-0"/> Statistiques Détaillées
+                        </h3>
+                        <StatsCard stats={portfolio?.stats} isCurrentUser={true} />
+                     </div>
+                  </div>
+               </div>
+            )}
+
+            {/* ONGLET AMÉLIORATIONS & SUCCÈS (LABO) */}
+            {activeTab === 'upgrades' && (
+              <div className="max-w-6xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
+                {!isLaboUnlocked ? (
+                   <div className="flex flex-col items-center justify-center py-16 sm:py-24 text-center px-4">
+                       <div className="p-5 bg-indigo-500/10 rounded-full border border-indigo-500/30 mb-6 shadow-[0_0_30px_rgba(99,102,241,0.2)]">
+                           <Lock className="w-12 h-12 sm:w-16 sm:h-16 text-indigo-400" />
+                       </div>
+                       <h2 className="text-2xl sm:text-3xl font-black mb-3">Marché Noir Verrouillé</h2>
+                       <p className="text-xs sm:text-sm text-zinc-400 max-w-sm mx-auto leading-relaxed">Le Labo clandestin est strictement réservé aux traders expérimentés. Atteignez <strong className="text-white">15 000$</strong> de valeur totale (Portefeuille Global) pour y accéder.</p>
+                       <div className="mt-8 bg-black/40 border border-white/10 p-4 sm:p-5 rounded-2xl w-full max-w-sm">
+                           <div className="flex justify-between text-xs sm:text-sm mb-2.5 font-bold">
+                               <span className="opacity-80">Progression Actuelle</span>
+                               <span className="text-indigo-400">{Math.min(100, (totalValueComputed / 15000) * 100).toFixed(1)}%</span>
+                           </div>
+                           <div className="w-full h-2.5 bg-black/50 rounded-full overflow-hidden border border-white/5">
+                               <div className="h-full bg-indigo-500 transition-all duration-1000 shadow-[0_0_10px_rgba(99,102,241,0.8)]" style={{ width: `${Math.min(100, (totalValueComputed / 15000) * 100)}%` }}></div>
+                           </div>
+                       </div>
+                   </div>
+                ) : (
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                  <div className="lg:col-span-2 space-y-6">
+                     <h2 className="text-xl sm:text-2xl font-black flex items-center gap-2"><Unlock className="w-5 h-5 sm:w-6 sm:h-6 text-indigo-400 shrink-0"/> Marché Noir</h2>
+                     <p className="text-[11px] sm:text-sm opacity-70 border-l-2 border-indigo-500 pl-3">Dépensez vos liquidités pour acheter des outils professionnels. Ces améliorations ne donnent aucun avantage sur les prix, mais transforment votre expérience de manière permanente.</p>
+                     
+                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        
+                        <div className={`${theme.panel} p-5 rounded-2xl border ${portfolio?.upgrades?.extendedHistory ? 'border-emerald-500/50' : 'border-white/10'} shadow-lg relative overflow-hidden group flex flex-col justify-between`}>
+                           <div>
+                               <div className="flex justify-between items-start mb-3">
+                                  <div className={`p-2 rounded-lg ${portfolio?.upgrades?.extendedHistory ? 'bg-emerald-500/20 text-emerald-400' : 'bg-white/5 text-white/50'}`}><History className="w-5 h-5"/></div>
+                                  {!portfolio?.upgrades?.extendedHistory && <span className="font-mono font-bold text-amber-400 text-sm">$10,000</span>}
+                               </div>
+                               <h4 className="font-bold text-sm sm:text-base mb-1 flex items-center gap-2">Graphique Étendu {portfolio?.upgrades?.extendedHistory && <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0"/>}</h4>
+                               <p className="text-[10px] sm:text-xs opacity-70 mb-5">Double l'historique visible et débloque le zoom 4x.</p>
+                           </div>
+                           {portfolio?.upgrades?.extendedHistory ? 
+                              <button className="w-full py-2.5 rounded-xl text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" disabled>Débloqué</button> :
+                              <button onClick={() => handleBuyUpgrade('extendedHistory', 10000)} className="w-full py-2.5 rounded-xl text-xs font-bold bg-white/10 hover:bg-indigo-500 hover:text-white transition-colors">Acheter l'accès</button>
+                           }
+                        </div>
+
+                        <div className={`${theme.panel} p-5 rounded-2xl border ${portfolio?.upgrades?.tradeMarkers ? 'border-emerald-500/50' : 'border-white/10'} shadow-lg relative overflow-hidden group flex flex-col justify-between`}>
+                           <div>
+                               <div className="flex justify-between items-start mb-3">
+                                  <div className={`p-2 rounded-lg ${portfolio?.upgrades?.tradeMarkers ? 'bg-emerald-500/20 text-emerald-400' : 'bg-white/5 text-white/50'}`}><Target className="w-5 h-5"/></div>
+                                  {!portfolio?.upgrades?.tradeMarkers && <span className="font-mono font-bold text-amber-400 text-sm">$15,000</span>}
+                               </div>
+                               <h4 className="font-bold text-sm sm:text-base mb-1 flex items-center gap-2">Marqueurs de Trade {portfolio?.upgrades?.tradeMarkers && <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0"/>}</h4>
+                               <p className="text-[10px] sm:text-xs opacity-70 mb-5">Affiche vos transactions (points colorés) sur le graphique.</p>
+                           </div>
+                           {portfolio?.upgrades?.tradeMarkers ? 
+                              <button className="w-full py-2.5 rounded-xl text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" disabled>Débloqué</button> :
+                              <button onClick={() => handleBuyUpgrade('tradeMarkers', 15000)} className="w-full py-2.5 rounded-xl text-xs font-bold bg-white/10 hover:bg-indigo-500 hover:text-white transition-colors">Acheter l'outil</button>
+                           }
+                        </div>
+
+                        {/* NOUVEAUX UPGRADES LABO */}
+                        <div className={`${theme.panel} p-5 rounded-2xl border ${portfolio?.upgrades?.insiderTrading ? 'border-indigo-500/50' : 'border-white/10'} shadow-lg relative overflow-hidden group flex flex-col justify-between`}>
+                           <div>
+                               <div className="flex justify-between items-start mb-3">
+                                  <div className={`p-2 rounded-lg ${portfolio?.upgrades?.insiderTrading ? 'bg-indigo-500/20 text-indigo-400' : 'bg-white/5 text-white/50'}`}><Eye className="w-5 h-5"/></div>
+                                  {!portfolio?.upgrades?.insiderTrading && <span className="font-mono font-bold text-amber-400 text-sm">$50,000</span>}
+                               </div>
+                               <h4 className="font-bold text-sm sm:text-base mb-1 flex items-center gap-2">Délit d'initié {portfolio?.upgrades?.insiderTrading && <CheckCircle2 className="w-4 h-4 text-indigo-400 shrink-0"/>}</h4>
+                               <p className="text-[10px] sm:text-xs opacity-70 mb-5">Réduit de moitié les pénalités punitives lors de vos reventes à perte (passe de x5 à x2).</p>
+                           </div>
+                           {portfolio?.upgrades?.insiderTrading ? 
+                              <button className="w-full py-2.5 rounded-xl text-xs font-bold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20" disabled>Débloqué</button> :
+                              <button onClick={() => handleBuyUpgrade('insiderTrading', 50000)} className="w-full py-2.5 rounded-xl text-xs font-bold bg-white/10 hover:bg-indigo-500 hover:text-white transition-colors">Acheter l'accès</button>
+                           }
+                        </div>
+
+                        <div className={`${theme.panel} p-5 rounded-2xl border ${portfolio?.upgrades?.whaleWallet ? 'border-amber-500/50' : 'border-white/10'} shadow-lg relative overflow-hidden group flex flex-col justify-between`}>
+                           <div>
+                               <div className="flex justify-between items-start mb-3">
+                                  <div className={`p-2 rounded-lg ${portfolio?.upgrades?.whaleWallet ? 'bg-amber-500/20 text-amber-400' : 'bg-white/5 text-white/50'}`}><DollarSign className="w-5 h-5"/></div>
+                                  {!portfolio?.upgrades?.whaleWallet && <span className="font-mono font-bold text-amber-400 text-sm">$75,000</span>}
+                               </div>
+                               <h4 className="font-bold text-sm sm:text-base mb-1 flex items-center gap-2">Coffre Baleine {portfolio?.upgrades?.whaleWallet && <CheckCircle2 className="w-4 h-4 text-amber-400 shrink-0"/>}</h4>
+                               <p className="text-[10px] sm:text-xs opacity-70 mb-5">Augmente la limite de stockage maximale de votre générateur passif de 50$ à 250$.</p>
+                           </div>
+                           {portfolio?.upgrades?.whaleWallet ? 
+                              <button className="w-full py-2.5 rounded-xl text-xs font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20" disabled>Débloqué</button> :
+                              <button onClick={() => handleBuyUpgrade('whaleWallet', 75000)} className="w-full py-2.5 rounded-xl text-xs font-bold bg-white/10 hover:bg-amber-500 hover:text-black transition-colors">Améliorer Coffre</button>
+                           }
+                        </div>
+                        {/* FIN NOUVEAUX UPGRADES */}
+
+                        <div className={`${theme.panel} p-5 rounded-2xl border ${portfolio?.upgrades?.diamondHands ? 'border-emerald-500/50' : 'border-white/10'} shadow-lg relative overflow-hidden group flex flex-col justify-between`}>
+                           <div>
+                               <div className="flex justify-between items-start mb-3">
+                                  <div className={`p-2 rounded-lg ${portfolio?.upgrades?.diamondHands ? 'bg-emerald-500/20 text-emerald-400' : 'bg-white/5 text-white/50'}`}><Briefcase className="w-5 h-5"/></div>
+                                  {!portfolio?.upgrades?.diamondHands && <span className="font-mono font-bold text-amber-400 text-sm">$100,000</span>}
+                               </div>
+                               <h4 className="font-bold text-sm sm:text-base mb-1 flex items-center gap-2">Mains de Diamant {portfolio?.upgrades?.diamondHands && <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0"/>}</h4>
+                               <p className="text-[10px] sm:text-xs opacity-70 mb-5">Réduit définitivement vos frais de transaction de 1% à 0.5%.</p>
+                           </div>
+                           {portfolio?.upgrades?.diamondHands ? 
+                              <button className="w-full py-2.5 rounded-xl text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" disabled>Débloqué</button> :
+                              <button onClick={() => handleBuyUpgrade('diamondHands', 100000)} className="w-full py-2.5 rounded-xl text-xs font-bold bg-white/10 hover:bg-indigo-500 hover:text-white transition-colors">Acheter la licence</button>
+                           }
+                        </div>
+
+                        <div className={`${theme.panel} p-5 rounded-2xl border ${portfolio?.upgrades?.unlockedThemes?.includes('cyberpunk') ? 'border-fuchsia-500/50' : 'border-white/10'} shadow-lg flex flex-col justify-between`}>
+                           <div>
+                               <div className="flex justify-between items-start mb-3">
+                                  <div className="p-2 rounded-lg bg-fuchsia-500/20 text-fuchsia-400"><Palette className="w-5 h-5"/></div>
+                                  {!portfolio?.upgrades?.unlockedThemes?.includes('cyberpunk') && <span className="font-mono font-bold text-amber-400 text-sm">$25,000</span>}
+                               </div>
+                               <h4 className="font-bold text-sm sm:text-base mb-1">Thème "Cyberpunk"</h4>
+                               <p className="text-[10px] sm:text-xs opacity-70 mb-5">Des néons violets et une interface futuriste.</p>
+                           </div>
+                           {!portfolio?.upgrades?.unlockedThemes?.includes('cyberpunk') ? 
+                              <button onClick={() => handleBuyUpgrade('cyberpunk', 25000, 'theme')} className="w-full py-2.5 rounded-xl text-xs font-bold bg-white/10 hover:bg-fuchsia-600 hover:text-white transition-colors">Acheter le Thème</button> :
+                              <button onClick={() => handleEquipTheme('cyberpunk')} className={`w-full py-2.5 rounded-xl text-xs font-bold transition-colors ${portfolio?.upgrades?.theme === 'cyberpunk' ? 'bg-fuchsia-500 text-white' : 'bg-white/10 hover:bg-white/20'}`}>{portfolio?.upgrades?.theme === 'cyberpunk' ? 'Équipé' : 'Équiper'}</button>
+                           }
+                        </div>
+
+                        <div className={`${theme.panel} p-5 rounded-2xl border ${portfolio?.upgrades?.unlockedThemes?.includes('matrix') ? 'border-green-500/50' : 'border-white/10'} shadow-lg flex flex-col justify-between`}>
+                           <div>
+                               <div className="flex justify-between items-start mb-3">
+                                  <div className="p-2 rounded-lg bg-green-500/20 text-green-400"><Palette className="w-5 h-5"/></div>
+                                  {!portfolio?.upgrades?.unlockedThemes?.includes('matrix') && <span className="font-mono font-bold text-amber-400 text-sm">$40,000</span>}
+                               </div>
+                               <h4 className="font-bold text-sm sm:text-base mb-1">Thème "Matrix"</h4>
+                               <p className="text-[10px] sm:text-xs opacity-70 mb-5">Le code brut. Un thème d'un vert impitoyable.</p>
+                           </div>
+                           {!portfolio?.upgrades?.unlockedThemes?.includes('matrix') ? 
+                              <button onClick={() => handleBuyUpgrade('matrix', 40000, 'theme')} className="w-full py-2.5 rounded-xl text-xs font-bold bg-white/10 hover:bg-green-600 hover:text-white transition-colors">Acheter le Thème</button> :
+                              <button onClick={() => handleEquipTheme('matrix')} className={`w-full py-2.5 rounded-xl text-xs font-bold transition-colors ${portfolio?.upgrades?.theme === 'matrix' ? 'bg-green-600 text-white' : 'bg-white/10 hover:bg-white/20'}`}>{portfolio?.upgrades?.theme === 'matrix' ? 'Équipé' : 'Équiper'}</button>
+                           }
+                        </div>
+
+                        <div className={`${theme.panel} p-5 rounded-2xl border ${portfolio?.upgrades?.unlockedThemes?.includes('gold') ? 'border-amber-500/50' : 'border-white/10'} shadow-lg flex flex-col justify-between`}>
+                           <div>
+                               <div className="flex justify-between items-start mb-3">
+                                  <div className="p-2 rounded-lg bg-amber-500/20 text-amber-400"><Palette className="w-5 h-5"/></div>
+                                  {!portfolio?.upgrades?.unlockedThemes?.includes('gold') && <span className="font-mono font-bold text-amber-400 text-sm">$50,000</span>}
+                               </div>
+                               <h4 className="font-bold text-sm sm:text-base mb-1">Thème "Luxe Gold"</h4>
+                               <p className="text-[10px] sm:text-xs opacity-70 mb-5">Pour l'élite de Wall Street. Or massif de rigueur.</p>
+                           </div>
+                           {!portfolio?.upgrades?.unlockedThemes?.includes('gold') ? 
+                              <button onClick={() => handleBuyUpgrade('gold', 50000, 'theme')} className="w-full py-2.5 rounded-xl text-xs font-bold bg-white/10 hover:bg-amber-500 hover:text-black transition-colors">Acheter le Thème</button> :
+                              <button onClick={() => handleEquipTheme('gold')} className={`w-full py-2.5 rounded-xl text-xs font-bold transition-colors ${portfolio?.upgrades?.theme === 'gold' ? 'bg-amber-500 text-black' : 'bg-white/10 hover:bg-white/20'}`}>{portfolio?.upgrades?.theme === 'gold' ? 'Équipé' : 'Équiper'}</button>
+                           }
+                        </div>
+                     </div>
+                     
+                     <div className="mt-4 p-4 border border-white/10 rounded-xl bg-black/20">
+                        <p className="text-[11px] sm:text-xs opacity-60 flex justify-between items-center">
+                           <span>Thème par défaut :</span>
+                           <button onClick={() => handleEquipTheme('default')} className={`px-4 py-1.5 rounded-lg font-bold transition-colors ${portfolio?.upgrades?.theme === 'default' ? 'bg-zinc-700 text-white' : 'bg-white/10 hover:bg-white/20'}`}>Équiper</button>
+                        </p>
+                     </div>
+                  </div>
+
+                  <div className={`${theme.panel} border ${theme.border} rounded-2xl p-5 sm:p-6 shadow-xl h-fit sticky top-24`}>
+                     <div className="flex justify-between items-center mb-6">
+                        <h3 className="text-base sm:text-lg font-bold flex items-center gap-2"><Award className="w-4 h-4 sm:w-5 sm:h-5 text-amber-400 shrink-0"/> Succès</h3>
+                        <span className="text-[10px] sm:text-xs font-mono bg-black/30 px-2 py-1 rounded-lg border border-white/5 shrink-0">{portfolio?.achievements?.length || 0} / {ACHIEVEMENTS_LIST.length}</span>
+                     </div>
+                     
+                     <div className="space-y-2 sm:space-y-3 h-[70vh] overflow-y-auto pr-2 scrollbar-hide">
+                        {ACHIEVEMENTS_LIST.map((ach) => {
+                           const isUnlocked = portfolio?.achievements?.includes(ach.id);
+                           const Icon = ach.icon;
+                           return (
+                              <div key={ach.id} className={`p-3 rounded-xl border flex items-center gap-3 transition-all ${isUnlocked ? 'border-white/10 bg-black/20 opacity-100' : 'border-white/5 bg-transparent opacity-40 grayscale'}`}>
+                                 <div className={`p-2 rounded-full shrink-0 ${isUnlocked ? ach.color : 'bg-white/5 text-white'}`}>
+                                    {isUnlocked ? <Icon className="w-4 h-4"/> : <Lock className="w-4 h-4"/>}
+                                 </div>
+                                 <div>
+                                    <h5 className="font-bold text-xs sm:text-sm leading-none mb-1">{ach.title}</h5>
+                                    <p className="text-[9px] sm:text-[10px] leading-tight">{ach.desc}</p>
+                                 </div>
+                              </div>
+                           )
+                        })}
+                     </div>
+                  </div>
+                </div>
                 )}
               </div>
             )}
 
           </main>
 
-          {/* FENÊTRE MODALE D'EXPLICATION (INFO) OPTIMISÉE POUR TÉLÉPHONNE */}
-          {showInfo && (
-            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm">
-              <div className="bg-[#121214] border border-zinc-700 rounded-2xl p-5 sm:p-6 max-w-lg w-full shadow-2xl relative max-h-[85vh] overflow-y-auto">
-                <button onClick={() => setShowInfo(false)} className="absolute top-4 right-4 text-zinc-400 hover:text-white transition-colors">
-                  <X className="w-5 h-5" />
-                </button>
-                <h2 className="text-xl sm:text-2xl font-bold mb-4 flex items-center gap-2 text-emerald-400">
-                  <Info className="w-5 h-5 sm:w-6 sm:h-6" /> Comment jouer ?
-                </h2>
-
-                <div className="space-y-4 text-zinc-300 text-xs sm:text-sm">
-                  <p>Bienvenue sur <strong>TRADEX.LIVE</strong>, un simulateur de bourse multijoueur synchrone en temps réel.</p>
-
-                  <div className="bg-zinc-900/50 p-3 sm:p-4 rounded-xl border border-zinc-800">
-                    <h3 className="font-bold text-white mb-1.5 flex items-center gap-2"><LineChart className="w-4 h-4 text-emerald-400"/> Bourse & Difficulté Réaliste</h3>
-                    <ul className="list-disc pl-5 space-y-1 text-zinc-400">
-                      <li><strong>Liquidités :</strong> Votre solde disponible en USD pour effectuer vos investissements.</li>
-                      <li><strong>Achat / Vente :</strong> Les frais de transaction sont de <strong>1%</strong>.</li>
-                      <li><strong>Pertes Asymétriques (x2) :</strong> Si vous revendez à perte sous votre prix moyen d'achat, vos pertes brutes sont multipliées par 2. Les gains sont normaux.</li>
-                      <li><strong>3 Marchés :</strong> Vous pouvez naviguer entre 3 marchés différents. Observez-les pour comprendre leur dynamique et diversifiez votre portefeuille !</li>
-                      <li><strong>Actualités mystères :</strong> Certaines actualités apparaissent en gris. À vous de deviner si la nouvelle est bonne ou mauvaise pour l'entreprise.</li>
-                    </ul>
-                  </div>
-
-                  <div className="bg-zinc-900/50 p-3 sm:p-4 rounded-xl border border-zinc-800">
-                    <h3 className="font-bold text-white mb-1.5 flex items-center gap-2"><Dices className="w-4 h-4 text-amber-400"/> Casino & Roulette</h3>
-                    <ul className="list-disc pl-5 space-y-1 text-zinc-400">
-                      <li><strong>Rouge / Noir :</strong> Double votre mise (2x).</li>
-                      <li><strong>Vert (0) :</strong> Multiplie par 35 votre mise (35x).</li>
-                    </ul>
-                  </div>
-
-                  <div className="bg-zinc-900/50 p-3 sm:p-4 rounded-xl border border-zinc-800">
-                    <h3 className="font-bold text-white mb-1.5 flex items-center gap-2"><Gift className="w-4 h-4 text-indigo-400"/> Bonus (Rétention & Salaire)</h3>
-                    <ul className="list-disc pl-5 space-y-1 text-zinc-400">
-                      <li><strong>Série de Jours :</strong> Obtenez de l'argent quotidiennement. Conserver votre série consécutive augmente vos bonus de récompense jusqu'à <strong>+70%</strong> le 7ème jour.</li>
-                      <li><strong>Générateur passif :</strong> Restez actif sur le site pour produire <strong>$0.05 par seconde</strong>. Récoltez votre butin avant d'atteindre le seuil maximal de <strong>$50.00</strong>.</li>
-                    </ul>
-                  </div>
-
-                  <div className="bg-zinc-900/50 p-3 sm:p-4 rounded-xl border border-zinc-800">
-                    <h3 className="font-bold text-white mb-1.5 flex items-center gap-2"><Trophy className="w-4 h-4 text-amber-500"/> Classement mondial</h3>
-                    <p className="text-zinc-400">
-                      Déterminez votre pseudonyme et comparez vos performances avec la communauté. Votre classement est basé sur votre <strong>Valeur Totale</strong> (Liquidités + Valeur estimée des actions sur les 3 marchés).
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* BARRE DE NAVIGATION INFÉRIEURE MOBILE */}
-          <nav className="fixed bottom-0 left-0 right-0 bg-[#09090b]/95 backdrop-blur-lg border-t border-zinc-800 z-50">
-            <div className="max-w-md mx-auto flex justify-between px-6 py-3">
-              <button 
-                onClick={() => setActiveTab('trade')} 
-                className={`flex flex-col items-center gap-1 transition-colors ${activeTab === 'trade' ? 'text-emerald-400' : 'text-zinc-500 hover:text-zinc-300'}`}
-              >
-                <LineChart className="w-5.5 h-5.5" />
-                <span className="text-[9px] font-bold uppercase tracking-wider">Bourse</span>
-              </button>
-              
-              <button 
-                onClick={() => setActiveTab('rewards')} 
-                className={`flex flex-col items-center gap-1 transition-colors relative ${activeTab === 'rewards' ? 'text-indigo-400' : 'text-zinc-500 hover:text-zinc-300'}`}
-              >
-                {(timeToReward === 0 || stakingEarnings > 0) && (
-                  <span className="absolute top-0.5 right-1 w-2 h-2 bg-indigo-500 rounded-full border-2 border-[#09090b]"></span>
-                )}
-                <Gift className="w-5.5 h-5.5" />
-                <span className="text-[9px] font-bold uppercase tracking-wider">Bonus</span>
-              </button>
-              
-              <button 
-                onClick={() => setActiveTab('leaderboard')} 
-                className={`flex flex-col items-center gap-1 transition-colors ${activeTab === 'leaderboard' ? 'text-amber-400' : 'text-zinc-500 hover:text-zinc-300'}`}
-              >
-                <Trophy className="w-5.5 h-5.5" />
-                <span className="text-[9px] font-bold uppercase tracking-wider">Top 50</span>
-              </button>
+          {/* BARRE DE NAVIGATION INFÉRIEURE OPTIMISÉE POUR PETITS ÉCRANS */}
+          <nav className={`fixed bottom-0 left-0 w-full ${theme.bg}/90 backdrop-blur-md border-t ${theme.border} z-50 pb-safe shadow-[0_-10px_40px_rgba(0,0,0,0.5)]`}>
+            <div className="max-w-md mx-auto flex justify-between p-1 sm:p-2 gap-1 overflow-x-hidden">
+               <button onClick={() => setActiveTab('trade')} className={`flex-1 flex flex-col items-center justify-center min-w-[50px] max-w-[72px] h-12 rounded-xl transition-all ${activeTab === 'trade' ? `text-${theme.primary}-400 bg-${theme.primary}-500/10` : 'text-zinc-500 hover:text-zinc-300'}`}>
+                  <LineChart className="w-5 h-5 mb-0.5 sm:mb-1 shrink-0" />
+                  <span className="text-[8px] sm:text-[9px] font-bold truncate px-1">Trade</span>
+               </button>
+               <button onClick={() => setActiveTab('rewards')} className={`flex-1 flex flex-col items-center justify-center min-w-[50px] max-w-[72px] h-12 rounded-xl transition-all relative ${activeTab === 'rewards' ? `text-${theme.primary}-400 bg-${theme.primary}-500/10` : 'text-zinc-500 hover:text-zinc-300'}`}>
+                  <Gift className="w-5 h-5 mb-0.5 sm:mb-1 shrink-0" />
+                  <span className="text-[8px] sm:text-[9px] font-bold truncate px-1">Bonus</span>
+                  {dailyCompleted && !daily.claimedToday && (
+                     <span className="absolute top-1.5 right-1 sm:right-3.5 w-2 h-2 bg-amber-500 rounded-full animate-ping"></span>
+                  )}
+               </button>
+               <button onClick={() => setActiveTab('leaderboard')} className={`flex-1 flex flex-col items-center justify-center min-w-[50px] max-w-[72px] h-12 rounded-xl transition-all ${activeTab === 'leaderboard' ? `text-${theme.primary}-400 bg-${theme.primary}-500/10` : 'text-zinc-500 hover:text-zinc-300'}`}>
+                  <Trophy className="w-5 h-5 mb-0.5 sm:mb-1 shrink-0" />
+                  <span className="text-[8px] sm:text-[9px] font-bold truncate px-1">Top 50</span>
+               </button>
+               <button onClick={() => setActiveTab('profile')} className={`flex-1 flex flex-col items-center justify-center min-w-[50px] max-w-[72px] h-12 rounded-xl transition-all ${activeTab === 'profile' ? `text-${theme.primary}-400 bg-${theme.primary}-500/10` : 'text-zinc-500 hover:text-zinc-300'}`}>
+                  <User className="w-5 h-5 mb-0.5 sm:mb-1 shrink-0" />
+                  <span className="text-[8px] sm:text-[9px] font-bold truncate px-1">Profil</span>
+               </button>
+               <button onClick={() => setActiveTab('upgrades')} className={`flex-1 flex flex-col items-center justify-center min-w-[50px] max-w-[72px] h-12 rounded-xl transition-all relative ${activeTab === 'upgrades' ? `text-${theme.primary}-400 bg-${theme.primary}-500/10` : 'text-zinc-500 hover:text-zinc-300'}`}>
+                  {isLaboUnlocked ? <Unlock className="w-5 h-5 mb-0.5 sm:mb-1 shrink-0" /> : <Lock className="w-5 h-5 mb-0.5 sm:mb-1 shrink-0" />}
+                  <span className="text-[8px] sm:text-[9px] font-bold truncate px-1">Labo</span>
+                  {isLaboUnlocked && portfolio?.balance > 10000 && !portfolio?.upgrades?.extendedHistory && <span className="absolute top-1 right-1 sm:right-3 w-2 h-2 bg-rose-500 rounded-full animate-pulse"></span>}
+               </button>
             </div>
           </nav>
 
+          {/* MODALE DU PROFIL D'UN AUTRE JOUEUR (CLASSEMENT) ANTI-DÉBORDEMENT */}
+          {selectedPlayer && (
+             <div className="fixed inset-0 z-[200] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in zoom-in duration-300">
+                <div className={`${theme.panel} border ${theme.border} p-5 sm:p-8 rounded-3xl max-w-2xl w-full relative shadow-[0_0_50px_rgba(0,0,0,0.8)] max-h-[90vh] flex flex-col overflow-hidden`}>
+                   <button onClick={() => setSelectedPlayer(null)} className="absolute top-4 right-4 p-2 bg-white/5 hover:bg-rose-500/20 hover:text-rose-400 rounded-full transition-colors z-10 shrink-0">
+                       <X className="w-5 h-5"/>
+                   </button>
+                   <div className="flex items-center gap-4 mb-6 border-b border-white/10 pb-4 shrink-0">
+                       <div className="w-14 h-14 rounded-full bg-amber-500/20 border border-amber-500/50 flex items-center justify-center text-amber-400 shrink-0">
+                          <User className="w-7 h-7" />
+                       </div>
+                       <div className="overflow-hidden pr-8">
+                          <h2 className="text-xl sm:text-2xl font-black text-white truncate">Profil de {selectedPlayer.pseudo}</h2>
+                          <p className="text-xs sm:text-sm text-amber-400/80 font-mono font-bold truncate">Valeur globale : {selectedPlayer.totalValue.toLocaleString('fr-FR', { style: 'currency', currency: 'USD' })}</p>
+                       </div>
+                   </div>
+                   <div className="overflow-y-auto scrollbar-hide pb-2 flex-1">
+                      <StatsCard stats={selectedPlayer.stats} isCurrentUser={false} />
+                   </div>
+                </div>
+             </div>
+          )}
         </div>
       );
     }
