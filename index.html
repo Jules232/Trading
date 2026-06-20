@@ -44,6 +44,10 @@
         .scrollbar-hide::-webkit-scrollbar { display: none; }
         .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
         .pb-safe { padding-bottom: env(safe-area-inset-bottom, 20px); }
+        
+        /* Animations UI fluides */
+        .glass-panel { transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+        .glass-panel:hover { box-shadow: 0 10px 30px -10px rgba(0,0,0,0.5); }
     </style>
 </head>
 <body class="bg-[#09090b] text-zinc-100 min-h-screen select-none transition-colors duration-500 overflow-x-hidden">
@@ -64,7 +68,7 @@
     import { 
       TrendingUp, TrendingDown, Activity, AlertCircle, DollarSign, Briefcase, Zap, Globe, 
       Users, Gift, LineChart, Trophy, Info, X, Flame, Coins, Dices, HelpCircle,
-      Palette, Maximize2, History, Target, Lock, Unlock, Award, CheckCircle2, ChevronRight, Sparkles, Eye, Bell, User, Shield
+      Palette, Maximize2, History, Target, Lock, Unlock, Award, CheckCircle2, ChevronRight, Sparkles, Eye, Bell, User, Shield, Bot
     } from 'lucide-react';
 
     // --- INITIALISATION FIREBASE ---
@@ -103,6 +107,16 @@
       { id: 'champion_or', title: 'Médaille d\'Or', desc: 'A terminé Top 1 mondial de la semaine.', icon: Trophy, color: 'text-yellow-400 bg-yellow-500/10' },
       { id: 'champion_argent', title: 'Médaille d\'Argent', desc: 'A terminé Top 2 mondial de la semaine.', icon: Trophy, color: 'text-gray-300 bg-gray-400/10' },
       { id: 'champion_bronze', title: 'Médaille de Bronze', desc: 'A terminé Top 3 mondial de la semaine.', icon: Trophy, color: 'text-amber-600 bg-amber-700/10' }
+    ];
+
+    // --- INTELLIGENCE ARTIFICIELLE : BOTS DE TRADING AUTONOMES ---
+    const BOTS_CONFIG = [
+      { id: 'bot_prudent_1', pseudo: 'Warren_B', profile: 'prudent' },
+      { id: 'bot_prudent_2', pseudo: 'SafeGuard', profile: 'prudent' },
+      { id: 'bot_balanced_1', pseudo: 'Equilibrio', profile: 'balanced' },
+      { id: 'bot_balanced_2', pseudo: 'TrendSurfer', profile: 'balanced' },
+      { id: 'bot_aggressif_1', pseudo: 'Wolf_WS', profile: 'aggressive' },
+      { id: 'bot_aggressif_2', pseudo: 'CryptoKing', profile: 'aggressive' }
     ];
 
     // --- DÉFINITION DES THÈMES ---
@@ -311,6 +325,7 @@
       const [leaderboard, setLeaderboard] = useState([]);
       const [pseudoInput, setPseudoInput] = useState('');
       const [selectedPlayer, setSelectedPlayer] = useState(null);
+      const [globalSettings, setGlobalSettings] = useState({ botsActive: true });
 
       // VARIABLES ADMIN
       const [isAdminMode, setIsAdminMode] = useState(false);
@@ -350,6 +365,9 @@
 
       const marketsRefState = useRef(markets);
       useEffect(() => { marketsRefState.current = markets; }, [markets]);
+      
+      const globalSettingsRefState = useRef(globalSettings);
+      useEffect(() => { globalSettingsRefState.current = globalSettings; }, [globalSettings]);
 
       // Met à jour le prix long terme
       useEffect(() => {
@@ -374,6 +392,20 @@
       const portfolioRefState = useRef(portfolio);
       const totalValueRef = useRef(0);
       useEffect(() => { portfolioRefState.current = portfolio; }, [portfolio]);
+
+      // Observer les paramètres globaux (Statut des Bots, etc.)
+      useEffect(() => {
+          if(!user) return;
+          const settingsRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'global');
+          const unsub = onSnapshot(settingsRef, (docSnap) => {
+              if (docSnap.exists()) {
+                  setGlobalSettings(docSnap.data());
+              } else {
+                  setDoc(settingsRef, { botsActive: true });
+              }
+          });
+          return () => unsub();
+      }, [user]);
 
       useEffect(() => {
         if (!user) return;
@@ -714,6 +746,183 @@
         return () => clearInterval(intervalId);
       }, [user?.uid]);
 
+      // --- MOTEUR DES BOTS AUTONOMES ---
+      useEffect(() => {
+        if (!user) return; 
+
+        const botEngineId = setInterval(async () => {
+          // Le client leader du marché 'm_medium' prend en charge le pilotage des bots 
+          // pour éviter qu'ils ne tradent en boucle si plusieurs joueurs sont connectés.
+          const currentMarket = marketsRefState.current['m_medium'];
+          if (!currentMarket || currentMarket.leaderId !== user.uid) return;
+
+          const now = Date.now();
+          const currentMarkets = marketsRefState.current;
+          const botsActive = globalSettingsRefState.current?.botsActive !== false; // Active par défaut
+
+          // Désactivation instantanée : nettoyage et blocage de la boucle
+          if (!botsActive) {
+              BOTS_CONFIG.forEach(bot => {
+                  const presenceRef = doc(db, 'artifacts', appId, 'public', 'data', 'online_users', bot.id);
+                  deleteDoc(presenceRef).catch(() => {});
+              });
+              return; 
+          }
+
+          // 1. Présence en ligne des bots (pour le compteur de joueurs)
+          BOTS_CONFIG.forEach(bot => {
+            const presenceRef = doc(db, 'artifacts', appId, 'public', 'data', 'online_users', bot.id);
+            setDoc(presenceRef, { lastActive: now }, { merge: true }).catch(() => {});
+          });
+
+          // 2. Traitement des décisions d'investissement pour chaque bot
+          for (const bot of BOTS_CONFIG) {
+             try {
+                 const botRef = doc(db, 'artifacts', appId, 'public', 'data', 'bots', bot.id);
+                 const botSnap = await getDoc(botRef);
+                 
+                 // Initialisation d'un bot s'il n'existe pas encore
+                 let botData = botSnap.exists() ? botSnap.data() : {
+                     balance: 10000 + (Math.random() * 5000), // Base financière aléatoire (10k à 15k)
+                     assets: { 'm_slow': { shares: 0, averageBuyPrice: 0 }, 'm_medium': { shares: 0, averageBuyPrice: 0 }, 'm_fast': { shares: 0, averageBuyPrice: 0 } },
+                     lastAction: 0,
+                     stats: { totalProfit: 0, totalTrades: 0, winningTrades: 0, bestTrade: 0, worstTrade: 0, highestPortfolio: 10000, playTimeSeconds: Math.floor(Math.random() * 3600) }
+                 };
+
+                 // Les bots n'agissent pas toutes les secondes pour rester réalistes (Cooldown min 8s)
+                 if (now - botData.lastAction < 8000) continue;
+
+                 let actionTaken = false;
+                 
+                 // Analyse de tous les marchés
+                 for (const mId of MARKET_IDS) {
+                     const market = currentMarkets[mId];
+                     if (!market || !market.history || market.history.length < 10) continue;
+
+                     const currentPrice = market.price;
+                     const history = market.history;
+                     // Calcul de la Moyenne Mobile (Simple Moving Average) sur les 10 derniers ticks
+                     const sma10 = history.slice(-10).reduce((a, b) => a + b, 0) / 10;
+                     const trendRatio = (currentPrice - sma10) / sma10; // Pourcentage d'écart avec la tendance
+                     
+                     if (!botData.assets) botData.assets = {};
+                     if (!botData.assets[mId]) botData.assets[mId] = { shares: 0, averageBuyPrice: 0 };
+                     
+                     const asset = botData.assets[mId];
+                     const profitPercent = asset.shares > 0 ? (currentPrice - asset.averageBuyPrice) / asset.averageBuyPrice : 0;
+                     
+                     let type = null;
+                     let allocRatio = 0; // % d'argent à investir lors d'un achat
+
+                     // LOGIQUE D'INTELLIGENCE PAR PROFIL DE BOT
+                     if (bot.profile === 'prudent') {
+                         if (mId === 'm_fast') continue; // Le prudent ignore la volatilité extrême de QuantumX
+                         if (asset.shares > 0 && profitPercent >= 0.05) { type = 'SELL'; } // Prise de profit rapide (+5%)
+                         else if (asset.shares > 0 && profitPercent <= -0.02) { type = 'SELL'; } // Stop Loss très strict (-2%)
+                         else if (asset.shares === 0 && trendRatio < -0.01 && trendRatio >= -0.04) { type = 'BUY'; allocRatio = 0.2; } // Achète les petites baisses
+                     } 
+                     else if (bot.profile === 'balanced') {
+                         if (asset.shares > 0 && profitPercent >= 0.12) { type = 'SELL'; } // Prend ses bénéfices à +12%
+                         else if (asset.shares > 0 && profitPercent <= -0.06) { type = 'SELL'; } // Stop Loss modéré (-6%)
+                         else if (asset.shares === 0 && (trendRatio < -0.03 || market.newsType === 'positive')) { type = 'BUY'; allocRatio = 0.4; } // Investit dans les dips et les bonnes news
+                     } 
+                     else if (bot.profile === 'aggressive') {
+                         if (mId === 'm_slow') continue; // L'agressif s'ennuie sur le marché lent
+                         const flash = market.flashEvent;
+                         
+                         // Réaction aux flash events
+                         if (flash && flash.active && flash.type === 'bull_run' && asset.shares === 0) { type = 'BUY'; allocRatio = 0.9; } // All In lors d'un Bull Run !
+                         else if (flash && flash.active && flash.type === 'flash_crash' && asset.shares > 0) { type = 'SELL'; } // Panic Sell lors d'un Crash
+                         else if (asset.shares > 0 && profitPercent >= 0.25) { type = 'SELL'; } // Hold jusqu'à +25%
+                         else if (asset.shares > 0 && profitPercent <= -0.15) { type = 'SELL'; } // Risque une perte jusqu'à 15%
+                         else if (asset.shares === 0 && trendRatio > 0.02) { type = 'BUY'; allocRatio = 0.6; } // Achète massivement si la tendance est très positive (FOMO)
+                     }
+
+                     // EXECUTION DES ORDRES DU BOT (AVEC IMPACT 100% RÉEL SUR LE MARCHÉ)
+                     if (type === 'BUY' && allocRatio > 0) {
+                         let maxQty = Math.floor((botData.balance * allocRatio) / currentPrice);
+                         // Cap la quantité pour éviter qu'un bot ne "détruise" la courbe en achetant 150 parts d'un coup.
+                         const qty = Math.min(maxQty, 15); 
+                         if (qty > 0 && botData.balance >= qty * currentPrice) {
+                             const cost = qty * currentPrice;
+                             asset.averageBuyPrice = ((asset.shares * asset.averageBuyPrice) + cost) / (asset.shares + qty);
+                             asset.shares += qty;
+                             botData.balance -= cost;
+                             botData.stats.totalTrades++;
+                             actionTaken = true;
+                             
+                             // Impact réel sur le marché (Exactement comme un joueur)
+                             const impactOnTrend = 0.5 * (MARKETS_CONFIG[mId].vol / 2.5) * qty; 
+                             const sentimentImpact = 3 * qty;
+                             const mRef = doc(db, 'artifacts', appId, 'public', 'data', 'markets', mId);
+                             setDoc(mRef, { 
+                                 trend: market.trend + impactOnTrend,
+                                 sentimentScore: (market.sentimentScore || 0) + sentimentImpact,
+                                 lastUpdate: Date.now()
+                             }, { merge: true }).catch(()=>{});
+                         }
+                     } else if (type === 'SELL' && asset.shares > 0) {
+                         const qty = Math.min(asset.shares, 15); // Vente par paliers réalistes
+                         const gain = qty * currentPrice;
+                         const profit = gain - (qty * asset.averageBuyPrice);
+                         asset.shares -= qty;
+                         if(asset.shares === 0) asset.averageBuyPrice = 0;
+                         botData.balance += gain;
+                         botData.stats.totalTrades++;
+                         botData.stats.totalProfit += profit;
+                         
+                         if (profit > 0) botData.stats.winningTrades++;
+                         if (profit > botData.stats.bestTrade) botData.stats.bestTrade = profit;
+                         if (profit < botData.stats.worstTrade) botData.stats.worstTrade = profit;
+                         actionTaken = true;
+
+                         // Impact réel sur le marché (Exactement comme un joueur)
+                         const impactOnTrend = -0.5 * (MARKETS_CONFIG[mId].vol / 2.5) * qty; 
+                         const sentimentImpact = -3 * qty;
+                         const mRef = doc(db, 'artifacts', appId, 'public', 'data', 'markets', mId);
+                         setDoc(mRef, { 
+                             trend: market.trend + impactOnTrend,
+                             sentimentScore: (market.sentimentScore || 0) + sentimentImpact,
+                             lastUpdate: Date.now()
+                         }, { merge: true }).catch(()=>{});
+                     }
+                 }
+
+                 // 3. Sauvegarde et mise à jour du classement
+                 if (actionTaken || (now - botData.lastAction > 15000)) {
+                     // Ajoute de l'aléatoire pour désynchroniser les bots les uns des autres
+                     botData.lastAction = now + Math.floor(Math.random() * 4000); 
+                     botData.stats.playTimeSeconds += 15;
+                     
+                     let botTotalValue = botData.balance;
+                     for (const m of MARKET_IDS) {
+                         if (botData.assets[m] && currentMarkets[m]) {
+                             botTotalValue += botData.assets[m].shares * currentMarkets[m].price;
+                         }
+                     }
+                     if (botTotalValue > botData.stats.highestPortfolio) botData.stats.highestPortfolio = botTotalValue;
+
+                     // Sauvegarde de l'état du bot
+                     await setDoc(botRef, botData, { merge: true });
+                     
+                     // Push direct dans le Leaderboard avec l'emoji robot
+                     const lbRef = doc(db, 'artifacts', appId, 'public', 'data', 'leaderboard', bot.id);
+                     await setDoc(lbRef, {
+                         pseudo: "🤖 " + bot.pseudo,
+                         totalValue: botTotalValue,
+                         lastUpdated: now,
+                         stats: botData.stats
+                     }, { merge: true });
+                 }
+             } catch (e) {
+                 console.warn("Erreur exécution bot", e);
+             }
+          }
+        }, 5000); // Exécution de la boucle des bots toutes les 5 secondes
+
+        return () => clearInterval(botEngineId);
+      }, [user]);
+
       useEffect(() => {
         if (!portfolio || !user) return;
         let unlockedSomething = false;
@@ -1032,36 +1241,36 @@
           const winRate = totalTrades > 0 ? Math.round(((s.winningTrades || 0) / totalTrades) * 100) : 0;
           return (
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4">
-                 <div className="bg-black/30 p-3 sm:p-4 rounded-xl border border-white/5 shadow-sm">
+                 <div className="bg-black/30 p-3 sm:p-4 rounded-xl border border-white/5 shadow-sm group hover:border-white/20 transition-colors duration-300">
                      <p className="text-[9px] sm:text-[10px] opacity-60 uppercase font-bold tracking-wider mb-1">Profit Total</p>
-                     <p className={`font-mono text-base sm:text-xl font-bold truncate ${s.totalProfit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{s.totalProfit > 0 ? '+' : ''}{(s.totalProfit || 0).toLocaleString('fr-FR', {style: 'currency', currency: 'USD'})}</p>
+                     <p className={`font-mono text-base sm:text-xl font-bold truncate transition-all duration-300 ${s.totalProfit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{s.totalProfit > 0 ? '+' : ''}{(s.totalProfit || 0).toLocaleString('fr-FR', {style: 'currency', currency: 'USD'})}</p>
                  </div>
-                 <div className="bg-black/30 p-3 sm:p-4 rounded-xl border border-white/5 shadow-sm overflow-hidden">
+                 <div className="bg-black/30 p-3 sm:p-4 rounded-xl border border-white/5 shadow-sm overflow-hidden group hover:border-white/20 transition-colors duration-300">
                      <p className="text-[9px] sm:text-[10px] opacity-60 uppercase font-bold tracking-wider mb-1">Trades</p>
-                     <p className="font-mono text-base sm:text-xl font-bold text-indigo-400 truncate">{totalTrades}</p>
+                     <p className="font-mono text-base sm:text-xl font-bold text-indigo-400 truncate transition-all duration-300">{totalTrades}</p>
                  </div>
-                 <div className="bg-black/30 p-3 sm:p-4 rounded-xl border border-white/5 shadow-sm overflow-hidden">
+                 <div className="bg-black/30 p-3 sm:p-4 rounded-xl border border-white/5 shadow-sm overflow-hidden group hover:border-white/20 transition-colors duration-300">
                      <p className="text-[9px] sm:text-[10px] opacity-60 uppercase font-bold tracking-wider mb-1 truncate">Taux de Réussite</p>
-                     <p className={`font-mono text-base sm:text-xl font-bold truncate ${winRate >= 50 ? 'text-emerald-400' : 'text-amber-400'}`}>{winRate}%</p>
+                     <p className={`font-mono text-base sm:text-xl font-bold truncate transition-all duration-300 ${winRate >= 50 ? 'text-emerald-400' : 'text-amber-400'}`}>{winRate}%</p>
                  </div>
-                 <div className="bg-black/30 p-3 sm:p-4 rounded-xl border border-white/5 shadow-sm overflow-hidden">
+                 <div className="bg-black/30 p-3 sm:p-4 rounded-xl border border-white/5 shadow-sm overflow-hidden group hover:border-white/20 transition-colors duration-300">
                      <p className="text-[9px] sm:text-[10px] opacity-60 uppercase font-bold tracking-wider mb-1">Meilleur Trade</p>
-                     <p className="font-mono text-base sm:text-xl font-bold text-emerald-400 truncate">+{(s.bestTrade || 0).toLocaleString('fr-FR', {style: 'currency', currency: 'USD'})}</p>
+                     <p className="font-mono text-base sm:text-xl font-bold text-emerald-400 truncate transition-all duration-300">+{(s.bestTrade || 0).toLocaleString('fr-FR', {style: 'currency', currency: 'USD'})}</p>
                  </div>
-                 <div className="bg-black/30 p-3 sm:p-4 rounded-xl border border-white/5 shadow-sm overflow-hidden">
+                 <div className="bg-black/30 p-3 sm:p-4 rounded-xl border border-white/5 shadow-sm overflow-hidden group hover:border-white/20 transition-colors duration-300">
                      <p className="text-[9px] sm:text-[10px] opacity-60 uppercase font-bold tracking-wider mb-1">Pire Trade</p>
-                     <p className="font-mono text-base sm:text-xl font-bold text-rose-400 truncate">{(s.worstTrade || 0).toLocaleString('fr-FR', {style: 'currency', currency: 'USD'})}</p>
+                     <p className="font-mono text-base sm:text-xl font-bold text-rose-400 truncate transition-all duration-300">{(s.worstTrade || 0).toLocaleString('fr-FR', {style: 'currency', currency: 'USD'})}</p>
                  </div>
-                 <div className="bg-black/30 p-3 sm:p-4 rounded-xl border border-white/5 shadow-sm overflow-hidden">
+                 <div className="bg-black/30 p-3 sm:p-4 rounded-xl border border-white/5 shadow-sm overflow-hidden group hover:border-white/20 transition-colors duration-300">
                      <p className="text-[9px] sm:text-[10px] opacity-60 uppercase font-bold tracking-wider mb-1">Max Portefeuille</p>
-                     <p className="font-mono text-base sm:text-xl font-bold text-amber-400 truncate">{(s.highestPortfolio || 10000).toLocaleString('fr-FR', {style: 'currency', currency: 'USD'})}</p>
+                     <p className="font-mono text-base sm:text-xl font-bold text-amber-400 truncate transition-all duration-300">{(s.highestPortfolio || 10000).toLocaleString('fr-FR', {style: 'currency', currency: 'USD'})}</p>
                  </div>
-                 <div className="bg-black/30 p-3 sm:p-4 rounded-xl border border-white/5 sm:col-span-3 shadow-sm flex items-center justify-between">
+                 <div className="bg-black/30 p-3 sm:p-4 rounded-xl border border-white/5 sm:col-span-3 shadow-sm flex items-center justify-between group hover:border-white/20 transition-colors duration-300">
                      <div className="overflow-hidden pr-2">
                         <p className="text-[9px] sm:text-[10px] opacity-60 uppercase font-bold tracking-wider mb-1 truncate">Temps de Jeu Cumulé</p>
-                        <p className="font-mono text-base sm:text-xl font-bold text-zinc-300 truncate">{formatPlayTime(s.playTimeSeconds)}</p>
+                        <p className="font-mono text-base sm:text-xl font-bold text-zinc-300 truncate transition-all duration-300">{formatPlayTime(s.playTimeSeconds)}</p>
                      </div>
-                     <Activity className={`w-8 h-8 opacity-20 shrink-0 ${isCurrentUser ? `text-${theme.primary}-500` : 'text-amber-500'}`} />
+                     <Activity className={`w-8 h-8 opacity-20 shrink-0 group-hover:scale-110 transition-transform duration-300 ${isCurrentUser ? `text-${theme.primary}-500 group-hover:opacity-40` : 'text-amber-500 group-hover:opacity-40'}`} />
                  </div>
               </div>
           );
@@ -1155,7 +1364,7 @@
       };
 
       return (
-        <div className="max-w-7xl mx-auto pb-28 font-sans px-4 sm:px-6 relative">
+        <div className="max-w-7xl mx-auto pb-32 sm:pb-28 font-sans px-4 sm:px-6 relative">
           
           {/* TOAST NOTIFICATIONS */}
           <div className="fixed top-16 left-4 right-4 sm:left-auto sm:top-20 sm:right-4 z-[100] flex flex-col gap-2 pointer-events-none sm:w-72">
@@ -1169,11 +1378,11 @@
             ))}
           </div>
 
-          {/* MODALE ADMIN (Remplacement du prompt bloqué par le navigateur) */}
+          {/* MODALE ADMIN */}
           {showAdminPrompt && (
              <div className="fixed inset-0 z-[200] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in zoom-in duration-300">
                 <div className={`${theme.panel} border ${theme.border} p-6 rounded-3xl max-w-sm w-full relative shadow-[0_0_50px_rgba(0,0,0,0.8)]`}>
-                   <button onClick={() => { setShowAdminPrompt(false); setAdminPwd(''); }} className="absolute top-4 right-4 p-2 bg-white/5 hover:bg-rose-500/20 hover:text-rose-400 rounded-full transition-colors">
+                   <button onClick={() => { setShowAdminPrompt(false); setAdminPwd(''); }} className="absolute top-4 right-4 p-2 bg-white/5 hover:bg-rose-500/20 hover:text-rose-400 rounded-full transition-colors active:scale-95">
                        <X className="w-4 h-4"/>
                    </button>
                    <h2 className="text-xl font-black text-white mb-4 flex items-center gap-2"><Shield className="w-5 h-5 text-rose-500"/> Accès Admin</h2>
@@ -1213,7 +1422,7 @@
                             setShowAdminPrompt(false);
                          }
                       }}
-                      className="w-full bg-rose-600 hover:bg-rose-500 text-white font-bold py-2.5 rounded-xl transition-colors text-sm"
+                      className="w-full bg-rose-600 hover:bg-rose-500 text-white font-bold py-2.5 rounded-xl transition-all active:scale-95 active:translate-y-0.5 text-sm shadow-lg shadow-rose-600/20 hover:shadow-rose-600/40"
                    >
                       Valider
                    </button>
@@ -1230,11 +1439,11 @@
                       setActiveTab('admin');
                   }
               }}>
-                <Globe className={`w-5 h-5 text-${theme.primary}-400 shrink-0 group-hover:animate-spin`} />
-                <h1 className="text-base sm:text-lg font-bold tracking-tight truncate">TRADEX<span className={`text-${theme.primary}-500`}>.LIVE</span></h1>
+                <Globe className={`w-5 h-5 text-${theme.primary}-400 shrink-0 group-hover:animate-spin transition-all duration-500`} />
+                <h1 className="text-base sm:text-lg font-bold tracking-tight truncate transition-colors group-hover:text-white">TRADEX<span className={`text-${theme.primary}-500`}>.LIVE</span></h1>
               </div>
               <div className="flex gap-2 sm:gap-6 text-sm items-center shrink-0">
-                <div className={`flex items-center gap-1.5 bg-black/40 px-3 py-1.5 rounded-full border ${theme.border}`}>
+                <div className={`flex items-center gap-1.5 bg-black/40 px-3 py-1.5 rounded-full border ${theme.border} shadow-inner`}>
                   <span className="relative flex h-2 w-2 shrink-0">
                     <span className={`animate-ping absolute inline-flex h-full w-full rounded-full bg-${theme.primary}-400 opacity-75`}></span>
                     <span className={`relative inline-flex rounded-full h-2 w-2 bg-${theme.primary}-500`}></span>
@@ -1244,7 +1453,7 @@
                 </div>
                 <div className={`hidden sm:flex flex-col items-end border-l ${theme.border} pl-6`}>
                   <span className="text-[10px] uppercase font-bold opacity-60 flex items-center gap-1"><Briefcase className="w-3.5 h-3.5"/> Portefeuille Global</span>
-                  <span className="font-mono font-medium">{totalValueComputed.toLocaleString('fr-FR', { style: 'currency', currency: 'USD' })}</span>
+                  <span className="font-mono font-medium transition-all duration-300">{totalValueComputed.toLocaleString('fr-FR', { style: 'currency', currency: 'USD' })}</span>
                 </div>
               </div>
             </div>
@@ -1254,7 +1463,7 @@
             
             {/* BANDEAU EN DIRECT FLASH EVENT CRASH / BULL RUN AVEC BOUTON DE FERMETURE */}
             {activeMarket.flashEvent && activeMarket.flashEvent.active && !dismissedEvents.includes(activeMarket.flashEvent.endTime) && (
-              <div className={`mb-4 py-2.5 sm:py-3 px-4 rounded-xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-lg transition-all ${
+              <div className={`mb-4 py-2.5 sm:py-3 px-4 rounded-xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-lg transition-all duration-500 animate-in fade-in slide-in-from-top-4 ${
                 activeMarket.flashEvent.type === 'bull_run' 
                   ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' 
                   : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
@@ -1269,12 +1478,12 @@
                    </p>
                 </div>
                 <div className="flex items-center gap-2 self-end sm:self-auto w-full sm:w-auto justify-end">
-                  <span className="text-[11px] font-mono font-bold bg-black/30 px-2 py-1 rounded-lg border border-white/5 shrink-0">
+                  <span className="text-[11px] font-mono font-bold bg-black/30 px-2 py-1 rounded-lg border border-white/5 shrink-0 shadow-inner">
                     {Math.max(0, Math.round((activeMarket.flashEvent.endTime - Date.now()) / 1000))}s
                   </span>
                   <button 
                     onClick={() => setDismissedEvents(prev => [...prev, activeMarket.flashEvent.endTime])}
-                    className="p-1 hover:bg-white/10 rounded-full transition-colors text-current shrink-0"
+                    className="p-1 hover:bg-white/10 rounded-full transition-all active:scale-95 text-current shrink-0"
                     title="Fermer l'alerte"
                   >
                     <X className="w-4 h-4" />
@@ -1293,10 +1502,10 @@
                     return (
                       <button key={mId} onClick={() => setActiveMarketId(mId)}
                         title={isUnlocked ? "" : `Débloquer pour ${MARKETS_CONFIG[mId].unlockCost.toLocaleString()}$`}
-                        className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-bold whitespace-nowrap transition-all border flex items-center gap-1.5 ${
+                        className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-bold whitespace-nowrap transition-all duration-300 active:scale-95 flex items-center gap-1.5 border ${
                           activeMarketId === mId 
-                          ? `bg-${theme.primary}-500 text-black border-${theme.primary}-400 shadow-lg shadow-${theme.primary}-500/20` 
-                          : `bg-black/20 hover:bg-black/40 ${theme.border}`
+                          ? `bg-${theme.primary}-500 text-black border-${theme.primary}-400 shadow-lg shadow-${theme.primary}-500/20 hover:-translate-y-0.5` 
+                          : `bg-black/20 hover:bg-black/40 hover:-translate-y-0.5 hover:shadow-md ${theme.border}`
                         }`}
                       >
                         {MARKETS_CONFIG[mId].name}
@@ -1308,8 +1517,8 @@
 
                 <div className="relative">
                   {!isMarketUnlocked && (
-                     <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-[#09090b]/80 backdrop-blur-[3px] rounded-2xl border border-white/10 p-4 sm:p-6 text-center">
-                        <div className="p-4 bg-amber-500/20 rounded-full mb-4">
+                     <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-[#09090b]/80 backdrop-blur-[3px] rounded-2xl border border-white/10 p-4 sm:p-6 text-center animate-in fade-in zoom-in duration-300">
+                        <div className="p-4 bg-amber-500/20 rounded-full mb-4 shadow-[0_0_20px_rgba(245,158,11,0.2)]">
                            <Lock className="w-10 h-10 text-amber-500" />
                         </div>
                         <h3 className="text-xl sm:text-2xl font-black text-white mb-2">Marché Verrouillé</h3>
@@ -1319,51 +1528,51 @@
                         <button 
                            onClick={() => handleUnlockMarket(activeMarketId)} 
                            disabled={portfolio.balance < MARKETS_CONFIG[activeMarketId].unlockCost} 
-                           className="bg-amber-500 hover:bg-amber-400 text-black font-black py-3 px-6 sm:px-8 rounded-xl shadow-[0_0_15px_rgba(245,158,11,0.4)] transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap text-sm sm:text-base"
+                           className="bg-amber-500 hover:bg-amber-400 text-black font-black py-3 px-6 sm:px-8 rounded-xl shadow-[0_0_15px_rgba(245,158,11,0.4)] transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap text-sm sm:text-base hover:-translate-y-0.5"
                         >
                            Débloquer ({MARKETS_CONFIG[activeMarketId].unlockCost.toLocaleString()}$)
                         </button>
                         {portfolio.balance < MARKETS_CONFIG[activeMarketId].unlockCost && (
-                            <p className="text-[11px] text-rose-400 mt-3 font-semibold">Fonds insuffisants</p>
+                            <p className="text-[11px] text-rose-400 mt-3 font-semibold animate-pulse">Fonds insuffisants</p>
                         )}
                      </div>
                   )}
 
                   <div className={`grid grid-cols-1 lg:grid-cols-3 gap-6 sm:gap-8 ${!isMarketUnlocked ? 'opacity-20 pointer-events-none blur-[2px] select-none transition-all duration-500' : 'transition-all duration-500'}`}>
                     <div className="lg:col-span-2 space-y-4 sm:space-y-6">
-                      <div className="flex flex-wrap justify-between items-end gap-3">
+                      <div className="flex flex-wrap justify-between items-end gap-3 glass-panel p-2 -mx-2 rounded-2xl border border-transparent">
                         <div className="overflow-hidden pr-2">
                           <p className="text-[10px] uppercase tracking-wider font-bold opacity-60 truncate">Marché : {MARKETS_CONFIG[activeMarketId].name}</p>
                           <div className="flex items-baseline gap-2">
-                            <h2 className="text-4xl sm:text-5xl font-bold font-mono tracking-tighter truncate">
+                            <h2 className="text-4xl sm:text-5xl font-bold font-mono tracking-tighter truncate transition-all duration-300">
                               ${activeMarket.price.toFixed(2)}
                             </h2>
-                            <span className={`flex items-center font-mono text-sm sm:text-lg shrink-0 ${isPositiveTrend ? 'text-emerald-400' : 'text-rose-400'}`}>
+                            <span className={`flex items-center font-mono text-sm sm:text-lg shrink-0 transition-colors duration-300 ${isPositiveTrend ? 'text-emerald-400' : 'text-rose-400'}`}>
                               {isPositiveTrend ? <TrendingUp className="w-4 h-4 mr-1" /> : <TrendingDown className="w-4 h-4 mr-1" />}
                               {Math.abs(percentChange).toFixed(2)}%
                             </span>
                           </div>
                         </div>
-                        <div className={`flex flex-col items-center justify-center px-4 py-2 rounded-xl border ${theme.panel} shadow-sm shrink-0 ${
+                        <div className={`flex flex-col items-center justify-center px-4 py-2 rounded-xl border ${theme.panel} shadow-sm shrink-0 transition-all duration-300 ${
                            sentiment > 0.5 ? 'border-emerald-500/30 text-emerald-400' : sentiment < -0.5 ? 'border-rose-500/30 text-rose-400' : `${theme.border} opacity-70`
                         }`}>
                            <p className="text-[9px] uppercase font-bold tracking-widest mb-0.5">Activité Joueurs</p>
                            <div className="flex items-center gap-1.5 font-semibold text-xs sm:text-sm">
-                              <SentimentIcon className="w-4 h-4" /> <span>{sentimentText}</span>
+                              <SentimentIcon className="w-4 h-4 transition-transform duration-300" /> <span>{sentimentText}</span>
                            </div>
                         </div>
                       </div>
 
                       {portfolio?.upgrades?.extendedHistory && (
-                         <div className={`flex items-center gap-3 p-2 rounded-lg border ${theme.border} bg-black/20 max-w-xs`}>
+                         <div className={`flex items-center gap-3 p-2 rounded-lg border ${theme.border} bg-black/20 max-w-xs animate-in fade-in`}>
                             <Maximize2 className="w-4 h-4 opacity-50 shrink-0" />
                             <span className="text-[10px] uppercase font-bold opacity-60 shrink-0">Zoom Graphique</span>
-                            <input type="range" min="1" max="4" value={zoomLevel} onChange={(e) => setZoomLevel(Number(e.target.value))} className={`w-full accent-${theme.primary}-500`} />
+                            <input type="range" min="1" max="4" value={zoomLevel} onChange={(e) => setZoomLevel(Number(e.target.value))} className={`w-full accent-${theme.primary}-500 transition-all`} />
                             <span className="font-mono text-xs">{zoomLevel}x</span>
                          </div>
                       )}
 
-                      <div className={`h-60 sm:h-80 lg:h-96 w-full ${theme.panel} border ${theme.border} rounded-2xl p-4 shadow-xl relative`}>
+                      <div className={`h-60 sm:h-80 lg:h-96 w-full ${theme.panel} border ${theme.border} rounded-2xl p-4 shadow-xl relative glass-panel`}>
                         {/* TICK DELAY est passé dynamiquement pour synchroniser les marqueurs */}
                         <SparklineChart 
                           data={dataToChart} 
@@ -1379,7 +1588,7 @@
                         <div className="absolute inset-0 pointer-events-none opacity-[0.03]" style={{ backgroundImage: 'linear-gradient(to right, #fff 1px, transparent 1px), linear-gradient(to bottom, #fff 1px, transparent 1px)', backgroundSize: '40px 40px' }}></div>
                       </div>
 
-                      <div className={`p-4 rounded-xl border flex items-start gap-4 transition-colors ${
+                      <div className={`p-4 rounded-xl border flex items-start gap-4 transition-all duration-500 glass-panel ${
                         activeMarket.newsType === 'positive' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-200' : 
                         activeMarket.newsType === 'negative' ? 'bg-rose-500/10 border-rose-500/20 text-rose-200' : 
                         activeMarket.newsType === 'grey' ? 'bg-zinc-400/10 border-zinc-500/30 text-zinc-300' : 
@@ -1387,46 +1596,46 @@
                       }`}>
                         {activeMarket.newsType === 'grey' ? <HelpCircle className="w-5 h-5 shrink-0 mt-0.5 opacity-60" /> : <Zap className={`w-5 h-5 shrink-0 mt-0.5 ${activeMarket.newsType === 'positive' ? 'text-emerald-400' : activeMarket.newsType === 'negative' ? 'text-rose-400' : 'opacity-60'}`} />}
                         <div>
-                          <p className="text-[10px] uppercase font-bold opacity-70 mb-0.5">Dernière Actualité {activeMarket.newsType === 'grey' && "(Impact caché)"}</p>
+                          <p className="text-[10px] uppercase font-bold opacity-70 mb-0.5 transition-colors">Dernière Actualité {activeMarket.newsType === 'grey' && "(Impact caché)"}</p>
                           <p className="text-sm font-medium leading-snug">{activeMarket.news}</p>
                         </div>
                       </div>
                     </div>
 
                     <div className="space-y-6">
-                      <div className={`${theme.panel} border ${theme.border} rounded-2xl p-5 shadow-xl`}>
+                      <div className={`${theme.panel} border ${theme.border} rounded-2xl p-5 shadow-xl glass-panel`}>
                         <div className="flex justify-between items-center mb-4 border-b border-white/10 pb-3">
                             <h3 className="text-lg font-bold flex gap-2"><DollarSign className={`text-${theme.primary}-400 shrink-0`} /> <span className="truncate">Vos Fonds</span></h3>
-                            <div className="flex bg-black/40 rounded-lg p-1 border border-white/10 shrink-0">
-                                <button onClick={() => setTradeQuantity(1)} className={`px-3 py-1 rounded-md text-xs font-bold transition-all ${tradeQuantity === 1 ? `bg-${theme.primary}-500 text-black` : 'text-zinc-500 hover:text-white'}`}>x1</button>
-                                <button onClick={() => setTradeQuantity(10)} className={`px-3 py-1 rounded-md text-xs font-bold transition-all ${tradeQuantity === 10 ? `bg-${theme.primary}-500 text-black` : 'text-zinc-500 hover:text-white'}`}>x10</button>
+                            <div className="flex bg-black/40 rounded-lg p-1 border border-white/10 shrink-0 shadow-inner">
+                                <button onClick={() => setTradeQuantity(1)} className={`px-3 py-1 rounded-md text-xs font-bold transition-all active:scale-95 ${tradeQuantity === 1 ? `bg-${theme.primary}-500 text-black shadow-sm` : 'text-zinc-500 hover:text-white'}`}>x1</button>
+                                <button onClick={() => setTradeQuantity(10)} className={`px-3 py-1 rounded-md text-xs font-bold transition-all active:scale-95 ${tradeQuantity === 10 ? `bg-${theme.primary}-500 text-black shadow-sm` : 'text-zinc-500 hover:text-white'}`}>x10</button>
                             </div>
                         </div>
                         
                         <div className="space-y-3 mb-5">
-                          <div className="flex justify-between items-center bg-black/30 p-3 rounded-lg border border-white/5">
+                          <div className="flex justify-between items-center bg-black/30 p-3 rounded-lg border border-white/5 shadow-sm transition-all hover:border-white/10">
                             <span className="text-[11px] sm:text-xs opacity-70">Liquidités</span>
-                            <span className="font-mono text-base sm:text-lg font-bold truncate pl-2">{portfolio.balance.toLocaleString('fr-FR', { style: 'currency', currency: 'USD' })}</span>
+                            <span className="font-mono text-base sm:text-lg font-bold truncate pl-2 transition-all">{portfolio.balance.toLocaleString('fr-FR', { style: 'currency', currency: 'USD' })}</span>
                           </div>
-                          <div className="flex justify-between items-center bg-black/30 p-3 rounded-lg border border-white/5">
+                          <div className="flex justify-between items-center bg-black/30 p-3 rounded-lg border border-white/5 shadow-sm transition-all hover:border-white/10">
                             <span className="text-[11px] sm:text-xs opacity-70 truncate pr-2">Actions ({MARKETS_CONFIG[activeMarketId].name})</span>
-                            <span className="font-mono font-bold text-blue-400">{activeAssets.shares}</span>
+                            <span className="font-mono font-bold text-blue-400 transition-all">{activeAssets.shares}</span>
                           </div>
                           {activeAssets.shares > 0 && (
                             <>
-                              <div className="flex justify-between items-center bg-black/30 p-3 rounded-lg border border-white/5">
+                              <div className="flex justify-between items-center bg-black/30 p-3 rounded-lg border border-white/5 shadow-sm transition-all hover:border-white/10 animate-in slide-in-from-top-2 fade-in">
                                 <span className="text-[11px] sm:text-xs opacity-70">Prix d'achat</span>
-                                <span className="font-mono text-sm">${(activeAssets.averageBuyPrice || 0).toFixed(2)}</span>
+                                <span className="font-mono text-sm transition-all">${(activeAssets.averageBuyPrice || 0).toFixed(2)}</span>
                               </div>
-                              <div className="flex justify-between items-center bg-black/30 p-3 rounded-lg border border-white/5">
+                              <div className="flex justify-between items-center bg-black/30 p-3 rounded-lg border border-white/5 shadow-sm transition-all hover:border-white/10 animate-in slide-in-from-top-2 fade-in">
                                 <span className="text-[11px] sm:text-xs opacity-70">Gains / Pertes</span>
-                                <span className={`font-mono text-sm truncate pl-2 ${activeMarket.price >= activeAssets.averageBuyPrice ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                <span className={`font-mono text-sm truncate pl-2 transition-colors duration-300 ${activeMarket.price >= activeAssets.averageBuyPrice ? 'text-emerald-400' : 'text-rose-400'}`}>
                                   {activeMarket.price >= activeAssets.averageBuyPrice ? '+' : ''}{((activeMarket.price - activeAssets.averageBuyPrice) * activeAssets.shares).toFixed(2)}$
                                 </span>
                               </div>
                               {activeMarket.price < activeAssets.averageBuyPrice && (
-                                <div className="p-2 bg-rose-500/10 border border-rose-500/20 rounded-lg text-rose-400 text-[10px] flex items-center gap-1.5 leading-tight">
-                                  <AlertCircle className="w-4 h-4 shrink-0" /> Attention ! Vente à perte (Perte x{portfolio.upgrades?.insiderTrading ? '2' : '5'}).
+                                <div className="p-2 bg-rose-500/10 border border-rose-500/20 rounded-lg text-rose-400 text-[10px] flex items-center gap-1.5 leading-tight animate-in fade-in">
+                                  <AlertCircle className="w-4 h-4 shrink-0 animate-pulse" /> Attention ! Vente à perte (Perte x{portfolio.upgrades?.insiderTrading ? '2' : '5'}).
                                 </div>
                               )}
                             </>
@@ -1434,10 +1643,10 @@
                         </div>
 
                         <div className="grid grid-cols-2 gap-3 sm:gap-4">
-                          <button onClick={() => handleTrade('BUY')} disabled={portfolio.balance < (activeMarket.price * tradeQuantity * (1 + (portfolio.upgrades?.diamondHands ? 0.005 : 0.01)))} className="group bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-xl py-3 font-bold flex flex-col items-center disabled:opacity-30 transition-all active:scale-95 text-xs sm:text-sm">
+                          <button onClick={() => handleTrade('BUY')} disabled={portfolio.balance < (activeMarket.price * tradeQuantity * (1 + (portfolio.upgrades?.diamondHands ? 0.005 : 0.01)))} className="group bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-xl py-3 font-bold flex flex-col items-center disabled:opacity-30 transition-all active:scale-95 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-emerald-500/20 text-xs sm:text-sm">
                             ACHETER x{tradeQuantity} <span className="text-[9px] font-normal opacity-70 mt-1">Frais: {portfolio.upgrades?.diamondHands ? '0.5%' : '1%'}</span>
                           </button>
-                          <button onClick={() => handleTrade('SELL')} disabled={activeAssets.shares < tradeQuantity} className="group bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-xl py-3 font-bold flex flex-col items-center disabled:opacity-30 transition-all active:scale-95 text-xs sm:text-sm">
+                          <button onClick={() => handleTrade('SELL')} disabled={activeAssets.shares < tradeQuantity} className="group bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-xl py-3 font-bold flex flex-col items-center disabled:opacity-30 transition-all active:scale-95 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-rose-500/20 text-xs sm:text-sm">
                             VENDRE x{tradeQuantity} <span className="text-[9px] font-normal opacity-70 mt-1">Frais: {portfolio.upgrades?.diamondHands ? '0.5%' : '1%'}</span>
                           </button>
                         </div>
@@ -1447,8 +1656,8 @@
                 </div>
 
                 {/* MODULE AETERNA (LONG TERME) */}
-                <div className="mt-8 p-5 sm:p-6 rounded-2xl bg-gradient-to-br from-[#1a1305] to-[#0a0802] border border-amber-500/30 shadow-[0_0_20px_rgba(245,158,11,0.15)] relative overflow-hidden">
-                   <div className="absolute top-0 right-0 w-64 h-64 bg-amber-500/10 rounded-full blur-3xl pointer-events-none"></div>
+                <div className="mt-8 p-5 sm:p-6 rounded-2xl bg-gradient-to-br from-[#1a1305] to-[#0a0802] border border-amber-500/30 shadow-[0_0_20px_rgba(245,158,11,0.15)] relative overflow-hidden glass-panel group">
+                   <div className="absolute top-0 right-0 w-64 h-64 bg-amber-500/10 rounded-full blur-3xl pointer-events-none group-hover:bg-amber-500/20 transition-colors duration-700"></div>
                    <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4 border-b border-amber-500/20 pb-4 relative z-10">
                       <div>
                          <h3 className="text-xl font-black text-amber-400 flex items-center gap-2"><Lock className="w-5 h-5 shrink-0"/> Fonds Aeterna</h3>
@@ -1459,24 +1668,24 @@
                       </div>
                       <div className="text-left md:text-right shrink-0">
                          <span className="text-[10px] sm:text-xs uppercase font-bold text-amber-500/60 block">Valeur Actuelle (1 part)</span>
-                         <span className="text-2xl sm:text-3xl font-mono font-black text-amber-400 drop-shadow-[0_0_5px_rgba(245,158,11,0.5)]">${aeternaPrice.toFixed(2)}</span>
+                         <span className="text-2xl sm:text-3xl font-mono font-black text-amber-400 drop-shadow-[0_0_5px_rgba(245,158,11,0.5)] transition-all">${aeternaPrice.toFixed(2)}</span>
                       </div>
                    </div>
 
                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 relative z-10">
-                       <div className="bg-black/60 border border-amber-500/20 p-4 rounded-xl">
+                       <div className="bg-black/60 border border-amber-500/20 p-4 rounded-xl shadow-inner transition-colors hover:border-amber-500/40">
                            <div className="flex justify-between items-center mb-3 text-xs sm:text-sm">
                                <span className="text-amber-200/60">Vos parts Aeterna</span>
-                               <span className="font-mono text-lg sm:text-xl font-black text-amber-400">{aeternaAssets.shares}</span>
+                               <span className="font-mono text-lg sm:text-xl font-black text-amber-400 transition-all">{aeternaAssets.shares}</span>
                            </div>
                            <div className="flex justify-between items-center mb-3 text-xs sm:text-sm">
                                <span className="text-amber-200/60">Prix d'achat moyen</span>
-                               <span className="font-mono text-zinc-300">${(aeternaAssets.averageBuyPrice || 0).toFixed(2)}</span>
+                               <span className="font-mono text-zinc-300 transition-all">${(aeternaAssets.averageBuyPrice || 0).toFixed(2)}</span>
                            </div>
                            <div className="flex justify-between items-center pt-2 border-t border-amber-500/10 text-xs sm:text-sm">
                                <span className="text-amber-200/60">Gains latents</span>
                                {aeternaAssets.shares > 0 ? (
-                                   <span className={`font-mono font-bold truncate pl-2 ${aeternaPrice >= aeternaAssets.averageBuyPrice ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                   <span className={`font-mono font-bold truncate pl-2 transition-colors duration-300 ${aeternaPrice >= aeternaAssets.averageBuyPrice ? 'text-emerald-400' : 'text-rose-400'}`}>
                                        {aeternaPrice >= aeternaAssets.averageBuyPrice ? '+' : ''}
                                        {((aeternaPrice - aeternaAssets.averageBuyPrice) * aeternaAssets.shares).toFixed(2)}$
                                    </span>
@@ -1486,17 +1695,17 @@
 
                        <div className="flex flex-col justify-center gap-3">
                            <div className="flex gap-3">
-                               <button onClick={() => handleTradeAeterna('BUY')} disabled={portfolio.balance < (aeternaPrice * tradeQuantity * 1.15)} className="flex-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-400 border border-amber-500/50 py-3 rounded-xl font-bold transition-all active:scale-95 disabled:opacity-30 flex flex-col items-center shadow-[0_0_10px_rgba(245,158,11,0.1)] text-xs sm:text-sm">
+                               <button onClick={() => handleTradeAeterna('BUY')} disabled={portfolio.balance < (aeternaPrice * tradeQuantity * 1.15)} className="flex-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-400 border border-amber-500/50 py-3 rounded-xl font-bold transition-all active:scale-95 disabled:opacity-30 flex flex-col items-center shadow-[0_0_10px_rgba(245,158,11,0.1)] text-xs sm:text-sm hover:-translate-y-0.5 hover:shadow-amber-500/30">
                                    ACHETER x{tradeQuantity}
-                                   <span className="text-[9px] opacity-70 font-normal mt-1">Coût: {(aeternaPrice * tradeQuantity * 1.15).toFixed(2)}$</span>
+                                   <span className="text-[9px] opacity-70 font-normal mt-1 transition-all">Coût: {(aeternaPrice * tradeQuantity * 1.15).toFixed(2)}$</span>
                                </button>
-                               <button onClick={() => handleTradeAeterna('SELL')} disabled={aeternaAssets.shares < tradeQuantity} className="flex-1 bg-black/40 hover:bg-amber-500/10 text-amber-400 border border-amber-500/30 py-3 rounded-xl font-bold transition-all active:scale-95 disabled:opacity-30 flex flex-col items-center text-xs sm:text-sm">
+                               <button onClick={() => handleTradeAeterna('SELL')} disabled={aeternaAssets.shares < tradeQuantity} className="flex-1 bg-black/40 hover:bg-amber-500/10 text-amber-400 border border-amber-500/30 py-3 rounded-xl font-bold transition-all active:scale-95 disabled:opacity-30 flex flex-col items-center text-xs sm:text-sm hover:-translate-y-0.5 hover:shadow-lg">
                                    VENDRE x{tradeQuantity}
-                                   <span className="text-[9px] opacity-70 font-normal mt-1">Gain: {(aeternaPrice * tradeQuantity).toFixed(2)}$</span>
+                                   <span className="text-[9px] opacity-70 font-normal mt-1 transition-all">Gain: {(aeternaPrice * tradeQuantity).toFixed(2)}$</span>
                                </button>
                            </div>
                            {aeternaPrice < aeternaAssets.averageBuyPrice && aeternaAssets.shares > 0 && (
-                               <p className="text-[10px] text-center text-rose-400 font-semibold bg-rose-500/10 py-1.5 px-2 rounded-lg border border-rose-500/20">Investissement encore en perte (Frais de 15%). Revenez dans quelques jours !</p>
+                               <p className="text-[10px] text-center text-rose-400 font-semibold bg-rose-500/10 py-1.5 px-2 rounded-lg border border-rose-500/20 animate-in fade-in">Investissement encore en perte (Frais de 15%). Revenez dans quelques jours !</p>
                            )}
                        </div>
                    </div>
@@ -1510,67 +1719,67 @@
               <div className="max-w-4xl mx-auto space-y-6 sm:space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   
-                  <div className={`${theme.panel} border ${theme.border} rounded-2xl p-5 sm:p-6 relative overflow-hidden flex flex-col justify-between shadow-xl`}>
+                  <div className={`${theme.panel} border ${theme.border} rounded-2xl p-5 sm:p-6 relative overflow-hidden flex flex-col justify-between shadow-xl glass-panel group`}>
                     <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-indigo-500 to-purple-500"></div>
                     <div>
                       <div className="flex justify-between items-center mb-4">
-                        <h3 className="text-lg font-bold flex gap-2 text-indigo-400"><Gift className="shrink-0" /> Salaire Journalier</h3>
-                        <div className="flex items-center gap-1 bg-amber-500/10 text-amber-400 px-2 py-0.5 rounded-full border border-amber-500/20 text-xs font-semibold shrink-0">
+                        <h3 className="text-lg font-bold flex gap-2 text-indigo-400"><Gift className="shrink-0 group-hover:scale-110 transition-transform duration-300" /> Salaire Journalier</h3>
+                        <div className="flex items-center gap-1 bg-amber-500/10 text-amber-400 px-2 py-0.5 rounded-full border border-amber-500/20 text-xs font-semibold shrink-0 shadow-sm">
                           <Flame className="w-3.5 h-3.5" /> Série: {portfolio.streak || 1}
                         </div>
                       </div>
                       <p className="text-[11px] sm:text-xs opacity-70 mb-6">Revenez chaque jour. À 7 jours consécutifs, gagnez un bonus permanent de +70%.</p>
                     </div>
                     <div className="space-y-4">
-                      <div className="bg-black/30 p-3 sm:p-4 rounded-xl border border-white/5 flex justify-between">
+                      <div className="bg-black/30 p-3 sm:p-4 rounded-xl border border-white/5 flex justify-between shadow-inner transition-colors hover:border-white/10">
                         <div>
                           <span className="text-[10px] uppercase font-bold opacity-60">Calculé</span>
-                          <span className="font-mono text-base sm:text-lg font-bold block mt-1 truncate">+${Math.round(REWARD_AMOUNT * (1 + ((portfolio.streak || 1) - 1) * 0.10))}</span>
+                          <span className="font-mono text-base sm:text-lg font-bold block mt-1 truncate transition-all">+${Math.round(REWARD_AMOUNT * (1 + ((portfolio.streak || 1) - 1) * 0.10))}</span>
                         </div>
                         <div className="text-right">
                           <span className="text-[10px] uppercase font-bold opacity-60">Statut</span>
-                          {timeToReward === 0 ? <span className="text-xs text-emerald-400 font-semibold flex items-center gap-1 justify-end mt-1.5"><span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-ping"></span> Prêt</span> : <span className="text-xs font-mono mt-1 block truncate">{formatTime(timeToReward)}</span>}
+                          {timeToReward === 0 ? <span className="text-xs text-emerald-400 font-semibold flex items-center gap-1 justify-end mt-1.5"><span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-ping"></span> Prêt</span> : <span className="text-xs font-mono mt-1 block truncate transition-all">{formatTime(timeToReward)}</span>}
                         </div>
                       </div>
-                      <button onClick={handleClaimReward} disabled={timeToReward > 0} className={`w-full py-3 sm:py-3.5 rounded-xl font-bold text-sm transition-all ${timeToReward === 0 ? 'bg-indigo-500 hover:bg-indigo-600 text-white shadow-lg active:scale-95' : 'bg-black/50 text-white/30 border border-white/10 cursor-not-allowed'}`}>
+                      <button onClick={handleClaimReward} disabled={timeToReward > 0} className={`w-full py-3 sm:py-3.5 rounded-xl font-bold text-sm transition-all hover:-translate-y-0.5 ${timeToReward === 0 ? 'bg-indigo-500 hover:bg-indigo-600 text-white shadow-lg shadow-indigo-500/30 active:scale-95' : 'bg-black/50 text-white/30 border border-white/10 cursor-not-allowed'}`}>
                         {timeToReward === 0 ? 'Réclamer mon salaire' : 'Patientez'}
                       </button>
                     </div>
                   </div>
 
-                  <div className={`${theme.panel} border ${theme.border} rounded-2xl p-5 sm:p-6 relative overflow-hidden flex flex-col justify-between shadow-xl`}>
+                  <div className={`${theme.panel} border ${theme.border} rounded-2xl p-5 sm:p-6 relative overflow-hidden flex flex-col justify-between shadow-xl glass-panel group`}>
                     <div className={`absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-${theme.primary}-500 to-teal-500`}></div>
                     <div>
                       <h3 className={`text-lg font-bold flex gap-2 text-${theme.primary}-400 mb-4`}><Coins className="animate-bounce shrink-0"/> Générateur Passif</h3>
                       <p className="text-[11px] sm:text-xs opacity-70 mb-6">Générez $0.05 par seconde pendant que l'app est ouverte (Max ${currentMaxStaking}).</p>
-                      <div className="bg-black/30 p-3 sm:p-4 rounded-xl border border-white/5 flex items-center justify-between gap-4 mb-6">
+                      <div className="bg-black/30 p-3 sm:p-4 rounded-xl border border-white/5 flex items-center justify-between gap-4 mb-6 shadow-inner transition-colors hover:border-white/10">
                         <div className="w-full bg-black/50 rounded-full h-4 overflow-hidden relative border border-white/10">
                           <div className={`bg-gradient-to-r from-${theme.primary}-500 to-teal-400 h-full transition-all duration-1000`} style={{ width: `${(stakingEarnings / currentMaxStaking) * 100}%` }}/>
                         </div>
-                        <span className={`font-mono text-lg sm:text-xl font-extrabold text-${theme.primary}-400 w-20 sm:w-24 text-right truncate`}>${stakingEarnings.toFixed(2)}</span>
+                        <span className={`font-mono text-lg sm:text-xl font-extrabold text-${theme.primary}-400 w-20 sm:w-24 text-right truncate transition-all`}>${stakingEarnings.toFixed(2)}</span>
                       </div>
                     </div>
-                    <button onClick={handleClaimStaking} disabled={stakingEarnings <= 0} className={`w-full py-3 sm:py-3.5 rounded-xl font-bold text-sm transition-all ${stakingEarnings > 0 ? `bg-${theme.primary}-500 hover:bg-${theme.primary}-600 text-black shadow-lg active:scale-95` : 'bg-black/50 text-white/30 border border-white/10 cursor-not-allowed'}`}>
+                    <button onClick={handleClaimStaking} disabled={stakingEarnings <= 0} className={`w-full py-3 sm:py-3.5 rounded-xl font-bold text-sm transition-all hover:-translate-y-0.5 ${stakingEarnings > 0 ? `bg-${theme.primary}-500 hover:bg-${theme.primary}-600 text-black shadow-lg shadow-${theme.primary}-500/30 active:scale-95` : 'bg-black/50 text-white/30 border border-white/10 cursor-not-allowed'}`}>
                       {stakingEarnings > 0 ? 'Récolter' : 'Vide'}
                     </button>
                   </div>
                 </div>
 
                 {/* BLOC DES DÉFIS QUOTIDIENS */}
-                <div className={`${theme.panel} border border-amber-500/20 rounded-2xl p-5 sm:p-6 shadow-xl relative overflow-hidden`}>
+                <div className={`${theme.panel} border border-amber-500/20 rounded-2xl p-5 sm:p-6 shadow-xl relative overflow-hidden glass-panel group`}>
                    <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-amber-500 to-orange-500"></div>
                    <div className="flex justify-between items-center border-b border-white/10 pb-3 mb-4 flex-wrap gap-2">
-                      <h4 className="text-sm sm:text-base uppercase font-black text-amber-400 flex items-center gap-2"><Sparkles className="w-4 h-4 sm:w-5 sm:h-5 shrink-0"/> Objectifs du Jour</h4>
-                      <span className="text-[10px] sm:text-xs font-mono bg-amber-500/10 px-2 sm:px-3 py-1 rounded-full text-amber-400 border border-amber-500/20 whitespace-nowrap">Jackpot : +$2,000</span>
+                      <h4 className="text-sm sm:text-base uppercase font-black text-amber-400 flex items-center gap-2"><Sparkles className="w-4 h-4 sm:w-5 sm:h-5 shrink-0 group-hover:rotate-12 transition-transform duration-300"/> Objectifs du Jour</h4>
+                      <span className="text-[10px] sm:text-xs font-mono bg-amber-500/10 px-2 sm:px-3 py-1 rounded-full text-amber-400 border border-amber-500/20 whitespace-nowrap shadow-sm">Jackpot : +$2,000</span>
                    </div>
                    
                    <div className="space-y-4">
                       <div>
                          <div className="flex justify-between items-center text-[11px] sm:text-sm mb-1.5">
                             <span className="opacity-80">🎯 Trades effectués aujourd'hui</span>
-                            <span className="font-mono font-bold text-amber-300">{daily.tradesCount} / 10</span>
+                            <span className="font-mono font-bold text-amber-300 transition-all">{daily.tradesCount} / 10</span>
                          </div>
-                         <div className="w-full bg-black/40 h-2 sm:h-2.5 rounded-full overflow-hidden">
+                         <div className="w-full bg-black/40 h-2 sm:h-2.5 rounded-full overflow-hidden shadow-inner border border-white/5">
                             <div className="bg-amber-500 h-full transition-all duration-500" style={{ width: `${Math.min(100, (daily.tradesCount / 10) * 100)}%` }}></div>
                          </div>
                       </div>
@@ -1578,9 +1787,9 @@
                       <div>
                          <div className="flex justify-between items-center text-[11px] sm:text-sm mb-1.5">
                             <span className="opacity-80">🎲 Lancements de roulette</span>
-                            <span className="font-mono font-bold text-amber-300">{daily.rouletteCount} / 3</span>
+                            <span className="font-mono font-bold text-amber-300 transition-all">{daily.rouletteCount} / 3</span>
                          </div>
-                         <div className="w-full bg-black/40 h-2 sm:h-2.5 rounded-full overflow-hidden">
+                         <div className="w-full bg-black/40 h-2 sm:h-2.5 rounded-full overflow-hidden shadow-inner border border-white/5">
                             <div className="bg-amber-500 h-full transition-all duration-500" style={{ width: `${Math.min(100, (daily.rouletteCount / 3) * 100)}%` }}></div>
                          </div>
                       </div>
@@ -1588,35 +1797,35 @@
                       <div>
                          <div className="flex justify-between items-center text-[11px] sm:text-sm mb-1.5">
                             <span className="opacity-80">⏳ Achats de parts Fonds Aeterna</span>
-                            <span className="font-mono font-bold text-amber-300">{daily.aeternaBought} / 1</span>
+                            <span className="font-mono font-bold text-amber-300 transition-all">{daily.aeternaBought} / 1</span>
                          </div>
-                         <div className="w-full bg-black/40 h-2 sm:h-2.5 rounded-full overflow-hidden mb-3">
+                         <div className="w-full bg-black/40 h-2 sm:h-2.5 rounded-full overflow-hidden mb-3 shadow-inner border border-white/5">
                             <div className="bg-amber-500 h-full transition-all duration-500" style={{ width: `${Math.min(100, (daily.aeternaBought / 1) * 100)}%` }}></div>
                          </div>
                       </div>
 
                       {dailyCompleted && !daily.claimedToday ? (
-                         <button onClick={handleClaimDailyJackpot} className="w-full py-3 sm:py-3.5 bg-gradient-to-r from-amber-500 to-orange-500 text-black font-black uppercase text-xs sm:text-sm rounded-xl shadow-lg shadow-amber-500/25 animate-pulse transition-transform active:scale-95">
+                         <button onClick={handleClaimDailyJackpot} className="w-full py-3 sm:py-3.5 bg-gradient-to-r from-amber-500 to-orange-500 text-black font-black uppercase text-xs sm:text-sm rounded-xl shadow-lg shadow-amber-500/25 animate-pulse transition-transform active:scale-95 hover:-translate-y-0.5">
                             Réclamer le Jackpot du jour (+$2,000)
                          </button>
                       ) : daily.claimedToday ? (
-                         <div className="text-center py-2 sm:py-3 text-amber-400/80 font-black border border-amber-500/30 bg-amber-500/5 rounded-xl text-xs sm:text-sm">
+                         <div className="text-center py-2 sm:py-3 text-amber-400/80 font-black border border-amber-500/30 bg-amber-500/5 rounded-xl text-xs sm:text-sm animate-in zoom-in duration-300">
                             Félicitations ! Jackpot quotidien récupéré.
                          </div>
                       ) : (
-                         <div className="text-center py-2 sm:py-3 text-zinc-500 font-bold bg-black/20 rounded-xl text-[10px] sm:text-xs border border-white/5 px-2">
+                         <div className="text-center py-2 sm:py-3 text-zinc-500 font-bold bg-black/20 rounded-xl text-[10px] sm:text-xs border border-white/5 px-2 transition-colors">
                             Complétez tous les défis pour débloquer le coffre !
                          </div>
                       )}
                    </div>
                 </div>
 
-                {/* BLOC DES RÉCOMPENSES DE CLASSEMENT (NOUVEAU) */}
-                <div className={`${theme.panel} border border-yellow-500/20 rounded-2xl p-5 sm:p-6 shadow-xl relative overflow-hidden mt-6`}>
+                {/* BLOC DES RÉCOMPENSES DE CLASSEMENT */}
+                <div className={`${theme.panel} border border-yellow-500/20 rounded-2xl p-5 sm:p-6 shadow-xl relative overflow-hidden mt-6 glass-panel group`}>
                    <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-yellow-400 to-amber-600"></div>
                    <div className="flex justify-between items-center border-b border-white/10 pb-3 mb-4 flex-wrap gap-2">
-                      <h4 className="text-sm sm:text-base uppercase font-black text-yellow-400 flex items-center gap-2"><Trophy className="w-4 h-4 sm:w-5 sm:h-5 shrink-0"/> Prime de Classement</h4>
-                      <span className="text-[10px] sm:text-xs font-mono bg-yellow-500/10 px-2 sm:px-3 py-1 rounded-full text-yellow-400 border border-yellow-500/20 whitespace-nowrap">Top 3 Uniquement</span>
+                      <h4 className="text-sm sm:text-base uppercase font-black text-yellow-400 flex items-center gap-2"><Trophy className="w-4 h-4 sm:w-5 sm:h-5 shrink-0 group-hover:scale-110 transition-transform duration-300"/> Prime de Classement</h4>
+                      <span className="text-[10px] sm:text-xs font-mono bg-yellow-500/10 px-2 sm:px-3 py-1 rounded-full text-yellow-400 border border-yellow-500/20 whitespace-nowrap shadow-sm">Top 3 Uniquement</span>
                    </div>
                    
                    <p className="text-xs sm:text-sm text-zinc-400 mb-5 leading-relaxed">
@@ -1624,43 +1833,43 @@
                    </p>
 
                    {isTop3 && !hasClaimedWeekly ? (
-                     <button onClick={handleClaimWeeklyReward} className="w-full py-3 sm:py-3.5 bg-gradient-to-r from-yellow-400 to-amber-500 text-black font-black uppercase text-xs sm:text-sm rounded-xl shadow-lg shadow-yellow-500/25 animate-pulse transition-transform active:scale-95">
+                     <button onClick={handleClaimWeeklyReward} className="w-full py-3 sm:py-3.5 bg-gradient-to-r from-yellow-400 to-amber-500 text-black font-black uppercase text-xs sm:text-sm rounded-xl shadow-lg shadow-yellow-500/25 animate-pulse transition-all active:scale-95 hover:-translate-y-0.5">
                         Réclamer ma récompense (Rang #{myRank + 1})
                      </button>
                    ) : hasClaimedWeekly ? (
-                     <div className="text-center py-2 sm:py-3 text-yellow-400/80 font-black border border-yellow-500/30 bg-yellow-500/5 rounded-xl text-xs sm:text-sm">
+                     <div className="text-center py-2 sm:py-3 text-yellow-400/80 font-black border border-yellow-500/30 bg-yellow-500/5 rounded-xl text-xs sm:text-sm animate-in zoom-in duration-300">
                         Récompense de la semaine récupérée !
                      </div>
                    ) : (
-                     <div className="text-center py-2 sm:py-3 text-zinc-500 font-bold bg-black/20 rounded-xl text-[10px] sm:text-xs border border-white/5 px-2">
+                     <div className="text-center py-2 sm:py-3 text-zinc-500 font-bold bg-black/20 rounded-xl text-[10px] sm:text-xs border border-white/5 px-2 transition-colors">
                         Atteignez le Top 3 pour débloquer. Actuel: {myRank >= 0 ? `#${myRank + 1}` : 'Non classé'}
                      </div>
                    )}
                 </div>
 
-                <div className={`${theme.panel} border border-amber-500/20 rounded-2xl p-5 sm:p-6 shadow-xl`}>
+                <div className={`${theme.panel} border border-amber-500/20 rounded-2xl p-5 sm:p-6 shadow-xl glass-panel`}>
                   <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 mb-6 border-b border-white/10 pb-4">
                     <h3 className="text-lg font-bold text-amber-400 flex gap-2 items-center"><Dices className="animate-spin shrink-0" style={{ animationDuration: '6s' }} /> La Roulette</h3>
-                    <div className="text-left sm:text-right"><span className="text-[11px] sm:text-xs opacity-60">Fonds : </span><span className="font-mono font-bold text-emerald-400 truncate pl-1">${portfolio.balance.toFixed(2)}</span></div>
+                    <div className="text-left sm:text-right"><span className="text-[11px] sm:text-xs opacity-60">Fonds : </span><span className="font-mono font-bold text-emerald-400 truncate pl-1 transition-all">${portfolio.balance.toFixed(2)}</span></div>
                   </div>
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                     <div className="space-y-4">
-                      <div className="flex bg-black/40 px-3 py-2 rounded-xl border border-white/10 focus-within:border-amber-500 transition-colors">
+                      <div className="flex bg-black/40 px-3 py-2 rounded-xl border border-white/10 focus-within:border-amber-500 transition-colors shadow-inner">
                         <span className="text-amber-500 mr-2 font-bold mt-0.5">$</span>
                         <input type="number" disabled={isSpinning} value={rouletteBet} onChange={(e) => setRouletteBet(Math.max(0, parseInt(e.target.value) || 0))} className="bg-transparent font-mono font-bold w-full outline-none text-base" min="1"/>
                       </div>
                       <div className="grid grid-cols-3 gap-2 sm:gap-3">
-                        <button onClick={() => setRouletteColor('red')} disabled={isSpinning} className={`py-2 sm:py-3 rounded-xl font-bold text-[10px] sm:text-xs flex flex-col items-center gap-1 border transition-all ${rouletteColor === 'red' ? 'bg-rose-600 border-white text-white scale-105 shadow-lg shadow-rose-900' : 'bg-black/40 border-rose-950 text-rose-500'}`}><span className="w-3 h-3 bg-rose-500 rounded-full"></span>Rouge <span className="font-normal">(x2)</span></button>
-                        <button onClick={() => setRouletteColor('black')} disabled={isSpinning} className={`py-2 sm:py-3 rounded-xl font-bold text-[10px] sm:text-xs flex flex-col items-center gap-1 border transition-all ${rouletteColor === 'black' ? 'bg-zinc-800 border-white text-white scale-105 shadow-lg' : 'bg-black/40 border-zinc-800 text-zinc-500'}`}><span className="w-3 h-3 bg-black border border-white/20 rounded-full"></span>Noir <span className="font-normal">(x2)</span></button>
-                        <button onClick={() => setRouletteColor('green')} disabled={isSpinning} className={`py-2 sm:py-3 rounded-xl font-bold text-[10px] sm:text-xs flex flex-col items-center gap-1 border transition-all ${rouletteColor === 'green' ? 'bg-emerald-600 border-white text-white scale-105 shadow-lg shadow-emerald-900' : 'bg-black/40 border-emerald-950 text-emerald-500'}`}><span className="w-3 h-3 bg-emerald-500 rounded-full"></span>Vert <span className="font-normal">(x35)</span></button>
+                        <button onClick={() => setRouletteColor('red')} disabled={isSpinning} className={`py-2 sm:py-3 rounded-xl font-bold text-[10px] sm:text-xs flex flex-col items-center gap-1 border transition-all active:scale-95 ${rouletteColor === 'red' ? 'bg-rose-600 border-white text-white scale-105 shadow-lg shadow-rose-900' : 'bg-black/40 border-rose-950 text-rose-500 hover:bg-rose-950/30'}`}><span className="w-3 h-3 bg-rose-500 rounded-full shadow-sm"></span>Rouge <span className="font-normal">(x2)</span></button>
+                        <button onClick={() => setRouletteColor('black')} disabled={isSpinning} className={`py-2 sm:py-3 rounded-xl font-bold text-[10px] sm:text-xs flex flex-col items-center gap-1 border transition-all active:scale-95 ${rouletteColor === 'black' ? 'bg-zinc-800 border-white text-white scale-105 shadow-lg' : 'bg-black/40 border-zinc-800 text-zinc-500 hover:bg-zinc-800/30'}`}><span className="w-3 h-3 bg-black border border-white/20 rounded-full shadow-sm"></span>Noir <span className="font-normal">(x2)</span></button>
+                        <button onClick={() => setRouletteColor('green')} disabled={isSpinning} className={`py-2 sm:py-3 rounded-xl font-bold text-[10px] sm:text-xs flex flex-col items-center gap-1 border transition-all active:scale-95 ${rouletteColor === 'green' ? 'bg-emerald-600 border-white text-white scale-105 shadow-lg shadow-emerald-900' : 'bg-black/40 border-emerald-950 text-emerald-500 hover:bg-emerald-950/30'}`}><span className="w-3 h-3 bg-emerald-500 rounded-full shadow-sm"></span>Vert <span className="font-normal">(x35)</span></button>
                       </div>
                     </div>
-                    <div className="bg-black/30 border border-white/10 rounded-xl p-4 flex flex-col justify-center items-center">
-                      <div className="h-20 sm:h-24 w-full flex items-center justify-center bg-black/50 border border-white/5 rounded-lg mb-4">
-                        {isSpinning ? <div className="animate-pulse flex gap-2"><span className="w-3 h-3 bg-rose-500 rounded-full"></span><span className="w-3 h-3 bg-zinc-400 rounded-full"></span><span className="w-3 h-3 bg-emerald-500 rounded-full"></span></div> : rouletteWinnerNum !== null ? <div className="flex flex-col items-center"><div className={`w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center rounded-full text-lg sm:text-xl font-bold border-2 text-white ${rouletteWinnerColor==='red'?'bg-rose-600 border-rose-400':rouletteWinnerColor==='black'?'bg-zinc-800 border-zinc-500':'bg-emerald-600 border-emerald-400'}`}>{rouletteWinnerNum}</div></div> : <span className="text-[11px] sm:text-xs opacity-50 font-mono">Faites vos jeux</span>}
+                    <div className="bg-black/30 border border-white/10 rounded-xl p-4 flex flex-col justify-center items-center shadow-inner transition-colors hover:border-white/20">
+                      <div className="h-20 sm:h-24 w-full flex items-center justify-center bg-black/50 border border-white/5 rounded-lg mb-4 shadow-inner">
+                        {isSpinning ? <div className="animate-pulse flex gap-2"><span className="w-3 h-3 bg-rose-500 rounded-full"></span><span className="w-3 h-3 bg-zinc-400 rounded-full"></span><span className="w-3 h-3 bg-emerald-500 rounded-full"></span></div> : rouletteWinnerNum !== null ? <div className="flex flex-col items-center animate-in zoom-in duration-300"><div className={`w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center rounded-full text-lg sm:text-xl font-bold border-2 text-white shadow-lg ${rouletteWinnerColor==='red'?'bg-rose-600 border-rose-400':rouletteWinnerColor==='black'?'bg-zinc-800 border-zinc-500':'bg-emerald-600 border-emerald-400'}`}>{rouletteWinnerNum}</div></div> : <span className="text-[11px] sm:text-xs opacity-50 font-mono transition-opacity">Faites vos jeux</span>}
                       </div>
-                      <p className={`text-[11px] sm:text-xs font-semibold mb-4 text-center truncate w-full ${rouletteStatusMessage.includes("Gagné") ? 'text-emerald-400' : rouletteStatusMessage.includes("Perdu") ? 'text-rose-400' : 'opacity-70'}`}>{rouletteStatusMessage}</p>
-                      <button onClick={handleSpinRoulette} disabled={isSpinning || portfolio.balance < rouletteBet} className="w-full bg-amber-500 hover:bg-amber-600 text-black py-2.5 sm:py-3 rounded-xl font-bold transition-all disabled:opacity-30 disabled:cursor-not-allowed text-xs sm:text-sm">Lancer la roue</button>
+                      <p className={`text-[11px] sm:text-xs font-semibold mb-4 text-center truncate w-full transition-colors duration-300 ${rouletteStatusMessage.includes("Gagné") ? 'text-emerald-400' : rouletteStatusMessage.includes("Perdu") ? 'text-rose-400' : 'opacity-70'}`}>{rouletteStatusMessage}</p>
+                      <button onClick={handleSpinRoulette} disabled={isSpinning || portfolio.balance < rouletteBet} className="w-full bg-amber-500 hover:bg-amber-600 text-black py-2.5 sm:py-3 rounded-xl font-bold transition-all disabled:opacity-30 disabled:cursor-not-allowed text-xs sm:text-sm active:scale-95 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-amber-500/20">Lancer la roue</button>
                     </div>
                   </div>
                 </div>
@@ -1671,33 +1880,33 @@
             {activeTab === 'leaderboard' && (
               <div className="max-w-2xl mx-auto mt-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
                 {!portfolio?.pseudo ? (
-                  <div className="bg-[#1a1305] border border-amber-500/30 rounded-2xl p-6 sm:p-8 shadow-[0_0_20px_rgba(245,158,11,0.15)] text-center">
-                    <Trophy className="w-12 h-12 sm:w-16 sm:h-16 text-amber-500 mx-auto mb-4 drop-shadow-[0_0_10px_rgba(245,158,11,0.5)]" />
+                  <div className="bg-[#1a1305] border border-amber-500/30 rounded-2xl p-6 sm:p-8 shadow-[0_0_20px_rgba(245,158,11,0.15)] text-center glass-panel">
+                    <Trophy className="w-12 h-12 sm:w-16 sm:h-16 text-amber-500 mx-auto mb-4 drop-shadow-[0_0_10px_rgba(245,158,11,0.5)] animate-bounce" style={{ animationDuration: '3s' }} />
                     <h3 className="text-xl sm:text-2xl font-black mb-2 text-amber-400">Rejoignez le Classement</h3>
                     <p className="text-[11px] sm:text-xs text-amber-200/70 mb-6 px-2">Définissez un pseudo pour comparer vos performances mondiales.</p>
                     <div className="flex flex-col sm:flex-row gap-2">
-                      <input type="text" value={pseudoInput} onChange={(e) => setPseudoInput(e.target.value)} placeholder="Votre pseudo..." className="flex-1 bg-black/60 border border-amber-500/30 text-amber-100 rounded-xl px-4 py-3 outline-none focus:border-amber-400 transition-colors placeholder:text-amber-700/50 text-sm" maxLength="15" />
-                      <button onClick={handleSetPseudo} className="bg-amber-500 hover:bg-amber-400 text-[#1a1305] font-black px-6 py-3 rounded-xl transition-all shadow-[0_0_15px_rgba(245,158,11,0.4)] text-sm whitespace-nowrap">Valider</button>
+                      <input type="text" value={pseudoInput} onChange={(e) => setPseudoInput(e.target.value)} placeholder="Votre pseudo..." className="flex-1 bg-black/60 border border-amber-500/30 text-amber-100 rounded-xl px-4 py-3 outline-none focus:border-amber-400 transition-colors placeholder:text-amber-700/50 text-sm shadow-inner" maxLength="15" />
+                      <button onClick={handleSetPseudo} className="bg-amber-500 hover:bg-amber-400 text-[#1a1305] font-black px-6 py-3 rounded-xl transition-all shadow-[0_0_15px_rgba(245,158,11,0.4)] text-sm whitespace-nowrap active:scale-95 hover:-translate-y-0.5">Valider</button>
                     </div>
                   </div>
                 ) : (
-                  <div className="bg-[#1a1305] border border-amber-500/30 rounded-2xl p-4 sm:p-6 shadow-[0_0_20px_rgba(245,158,11,0.1)] relative overflow-hidden">
-                    <div className="absolute top-0 right-0 w-64 h-64 bg-amber-500/10 rounded-full blur-3xl pointer-events-none"></div>
+                  <div className="bg-[#1a1305] border border-amber-500/30 rounded-2xl p-4 sm:p-6 shadow-[0_0_20px_rgba(245,158,11,0.1)] relative overflow-hidden glass-panel group">
+                    <div className="absolute top-0 right-0 w-64 h-64 bg-amber-500/10 rounded-full blur-3xl pointer-events-none group-hover:bg-amber-500/20 transition-colors duration-1000"></div>
                     <h3 className="text-lg sm:text-xl font-black flex items-center gap-2 mb-6 border-b border-amber-500/20 pb-4 text-amber-400">
                       <Trophy className="w-5 h-5 sm:w-6 sm:h-6 text-amber-400 drop-shadow-[0_0_5px_rgba(245,158,11,0.8)]" /> Classement Mondial
                     </h3>
                     <div className="space-y-2 sm:space-y-3 relative z-10">
                       {leaderboard.map((player, index) => (
-                        <div key={index} onClick={() => setSelectedPlayer(player)} className={`flex items-center justify-between p-3 sm:p-4 rounded-xl border transition-all cursor-pointer hover:scale-[1.02] ${player.pseudo === portfolio.pseudo ? 'bg-amber-500/20 border-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.2)]' : 'bg-black/40 border-amber-900/30 hover:border-amber-500/50'}`}>
-                          <div className="flex items-center gap-3 sm:gap-4 overflow-hidden pr-2 flex-1">
-                            <span className={`font-mono font-black text-sm sm:text-lg w-6 sm:w-8 text-center shrink-0 ${index === 0 ? 'text-amber-300 drop-shadow-[0_0_5px_rgba(253,230,138,0.8)]' : index === 1 ? 'text-zinc-300' : index === 2 ? 'text-amber-700' : 'text-amber-900/80'}`}>
+                        <div key={index} onClick={() => setSelectedPlayer(player)} className={`flex items-center justify-between p-3 sm:p-4 rounded-xl border transition-all duration-300 cursor-pointer hover:scale-[1.02] hover:-translate-y-0.5 ${player.pseudo === portfolio.pseudo ? 'bg-amber-500/20 border-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.2)]' : 'bg-black/40 border-amber-900/30 hover:border-amber-500/50 hover:shadow-lg'}`}>
+                          <div className="flex items-center gap-3 sm:gap-4 overflow-hidden pr-2 flex-1 min-w-0">
+                            <span className={`font-mono font-black text-sm sm:text-lg w-6 sm:w-8 text-center shrink-0 transition-colors ${index === 0 ? 'text-amber-300 drop-shadow-[0_0_5px_rgba(253,230,138,0.8)]' : index === 1 ? 'text-zinc-300' : index === 2 ? 'text-amber-700' : 'text-amber-900/80'}`}>
                               #{index + 1}
                             </span>
-                            <span className={`font-bold text-xs sm:text-sm truncate ${player.pseudo === portfolio.pseudo ? 'text-amber-300' : 'text-amber-100/90'}`}>
+                            <span className={`font-bold text-xs sm:text-sm truncate flex-1 min-w-0 transition-colors ${player.pseudo === portfolio.pseudo ? 'text-amber-300' : 'text-amber-100/90'}`}>
                               {player.pseudo}
                             </span>
                           </div>
-                          <span className={`font-mono text-xs sm:text-base font-black shrink-0 pl-2 ${player.pseudo === portfolio.pseudo ? 'text-amber-400' : 'text-amber-500/80'}`}>
+                          <span className={`font-mono text-xs sm:text-base font-black shrink-0 pl-2 transition-all ${player.pseudo === portfolio.pseudo ? 'text-amber-400' : 'text-amber-500/80'}`}>
                             {player.totalValue.toLocaleString('fr-FR', { style: 'currency', currency: 'USD' })}
                           </span>
                         </div>
@@ -1711,15 +1920,15 @@
             {/* ONGLET PROFIL */}
             {activeTab === 'profile' && (
                <div className="max-w-3xl mx-auto space-y-6 sm:space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                  <div className={`${theme.panel} border ${theme.border} rounded-2xl p-6 sm:p-8 shadow-xl relative overflow-hidden`}>
-                     <div className={`absolute top-0 right-0 w-64 h-64 bg-${theme.primary}-500/5 rounded-full blur-3xl pointer-events-none`}></div>
+                  <div className={`${theme.panel} border ${theme.border} rounded-2xl p-6 sm:p-8 shadow-xl relative overflow-hidden glass-panel group`}>
+                     <div className={`absolute top-0 right-0 w-64 h-64 bg-${theme.primary}-500/5 rounded-full blur-3xl pointer-events-none group-hover:bg-${theme.primary}-500/10 transition-colors duration-1000`}></div>
                      
                      <div className="flex items-center gap-5 mb-8 border-b border-white/10 pb-6 relative z-10">
-                        <div className={`w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-${theme.primary}-500/20 border border-${theme.primary}-500/50 flex items-center justify-center text-${theme.primary}-400 shadow-[0_0_15px_rgba(16,185,129,0.2)] shrink-0`}>
+                        <div className={`w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-${theme.primary}-500/20 border border-${theme.primary}-500/50 flex items-center justify-center text-${theme.primary}-400 shadow-[0_0_15px_rgba(16,185,129,0.2)] shrink-0 transition-transform duration-500 group-hover:scale-105`}>
                            <User className="w-8 h-8 sm:w-10 sm:h-10" />
                         </div>
                         <div className="overflow-hidden">
-                           <h2 className="text-2xl sm:text-3xl font-black mb-1 truncate">{portfolio?.pseudo || "Trader Anonyme"}</h2>
+                           <h2 className="text-2xl sm:text-3xl font-black mb-1 truncate transition-colors group-hover:text-white">{portfolio?.pseudo || "Trader Anonyme"}</h2>
                            <p className="text-xs sm:text-sm opacity-60 font-mono tracking-wider truncate">ID: {user?.uid.substring(0,8)}...{user?.uid.substring(user.uid.length - 4)}</p>
                         </div>
                      </div>
@@ -1733,7 +1942,7 @@
                         <div className="mt-8 pt-6 border-t border-white/10 flex justify-center">
                             <button 
                                 onClick={handleDeleteProfile}
-                                className={`text-[10px] sm:text-xs font-bold px-4 py-2 rounded-lg transition-colors border flex items-center gap-2 ${confirmDeleteProfile ? 'bg-rose-600 text-white border-rose-500 animate-pulse' : 'text-rose-500/80 hover:text-rose-400 bg-rose-500/10 hover:bg-rose-500/20 border-rose-500/20'}`}
+                                className={`text-[10px] sm:text-xs font-bold px-4 py-2 rounded-lg transition-all border flex items-center gap-2 active:scale-95 ${confirmDeleteProfile ? 'bg-rose-600 text-white border-rose-500 animate-pulse' : 'text-rose-500/80 hover:text-rose-400 bg-rose-500/10 hover:bg-rose-500/20 border-rose-500/20 hover:shadow-lg hover:shadow-rose-500/20'}`}
                             >
                                 <X className="w-3.5 h-3.5" /> 
                                 {confirmDeleteProfile ? "Confirmer la suppression (Irréversible)" : "Supprimer mon profil définitivement"}
@@ -1747,13 +1956,33 @@
             {/* ONGLET ADMINISTRATEUR SECRET */}
             {activeTab === 'admin' && isAdminMode && (
                <div className="max-w-4xl mx-auto space-y-6 sm:space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                  <div className={`${theme.panel} border border-rose-500/50 rounded-2xl p-6 sm:p-8 shadow-[0_0_30px_rgba(244,63,94,0.15)] relative overflow-hidden`}>
+                  <div className={`${theme.panel} border border-rose-500/50 rounded-2xl p-6 sm:p-8 shadow-[0_0_30px_rgba(244,63,94,0.15)] relative overflow-hidden glass-panel`}>
                      <h2 className="text-2xl font-black text-rose-500 mb-6 flex items-center gap-2">
                          <Shield className="w-6 h-6"/> Panneau d'Administration
                      </h2>
                      
                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 relative z-10">
-                        <div className="bg-black/40 border border-rose-500/30 p-5 rounded-xl flex flex-col justify-between">
+
+                        {/* NOUVEAU CONTROLE DES BOTS */}
+                        <div className="bg-black/40 border border-blue-500/30 p-5 rounded-xl flex flex-col justify-between transition-all hover:border-blue-500/50 hover:shadow-lg hover:shadow-blue-500/10">
+                           <div>
+                               <h3 className="font-bold text-blue-400 mb-2 flex items-center gap-2"><Bot className="w-4 h-4"/> IA & Bots de Trading</h3>
+                               <p className="text-xs text-zinc-400 mb-5">Contrôle l'activité des {BOTS_CONFIG.length} bots autonomes. Les changements de statut sont immédiats dans le monde entier.</p>
+                           </div>
+                           <button 
+                             onClick={async () => {
+                                const newState = globalSettings.botsActive === false ? true : false;
+                                const settingsRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'global');
+                                await setDoc(settingsRef, { botsActive: newState }, { merge: true });
+                                addNotification(`Intelligence Artificielle ${newState ? 'activée' : 'désactivée'}.`, "success");
+                             }}
+                             className={`w-full font-bold py-2.5 rounded-lg transition-all active:scale-95 text-sm flex items-center justify-center gap-2 ${globalSettings.botsActive !== false ? 'bg-rose-600/20 hover:bg-rose-600/30 text-rose-400 border border-rose-500/30' : 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-600/30'}`}
+                           >
+                              {globalSettings.botsActive !== false ? 'Désactiver tous les bots' : 'Démarrer le réseau neuronal'}
+                           </button>
+                        </div>
+
+                        <div className="bg-black/40 border border-rose-500/30 p-5 rounded-xl flex flex-col justify-between transition-all hover:border-rose-500/50 hover:shadow-lg hover:shadow-rose-500/10">
                            <div>
                                <h3 className="font-bold text-white mb-2">Réinitialisation Globale</h3>
                                <p className="text-xs text-zinc-400 mb-5">Remet le solde de l'ensemble des joueurs présents dans le classement à 10 000$.</p>
@@ -1774,13 +2003,13 @@
                                    setConfirmReset(false);
                                 }
                              }}
-                             className={`w-full text-white font-bold py-2.5 rounded-lg transition-colors text-sm ${confirmReset ? 'bg-red-600 hover:bg-red-500 animate-pulse' : 'bg-rose-600 hover:bg-rose-500'}`}
+                             className={`w-full text-white font-bold py-2.5 rounded-lg transition-all active:scale-95 text-sm ${confirmReset ? 'bg-red-600 hover:bg-red-500 animate-pulse' : 'bg-rose-600 hover:bg-rose-500 shadow-md hover:shadow-rose-600/30'}`}
                            >
                               {confirmReset ? 'Confirmer (Recliquer)' : 'Tout réinitialiser (10k)'}
                            </button>
                         </div>
                         
-                        <div className="bg-black/40 border border-emerald-500/30 p-5 rounded-xl flex flex-col justify-between">
+                        <div className="bg-black/40 border border-emerald-500/30 p-5 rounded-xl flex flex-col justify-between transition-all hover:border-emerald-500/50 hover:shadow-lg hover:shadow-emerald-500/10">
                            <div>
                                <h3 className="font-bold text-emerald-400 mb-2">S'enrichir (Self)</h3>
                                <p className="text-xs text-zinc-400 mb-5">Ajoute 1 000 000$ immédiatement sur votre portefeuille personnel.</p>
@@ -1791,13 +2020,13 @@
                                 await setDoc(pRef, { balance: portfolio.balance + 1000000 }, { merge: true });
                                 addNotification("1 000 000$ ajoutés à votre compte.", "success");
                              }}
-                             className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 rounded-lg transition-colors text-sm"
+                             className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2.5 rounded-lg transition-all active:scale-95 text-sm shadow-md hover:shadow-emerald-600/30"
                            >
                               + 1 000 000$
                            </button>
                         </div>
 
-                        <div className="bg-black/40 border border-amber-500/30 p-5 rounded-xl flex flex-col justify-between">
+                        <div className="bg-black/40 border border-amber-500/30 p-5 rounded-xl flex flex-col justify-between transition-all hover:border-amber-500/50 hover:shadow-lg hover:shadow-amber-500/10">
                            <div>
                                <h3 className="font-bold text-amber-400 mb-2">Forcer un Événement Positif</h3>
                                <p className="text-xs text-zinc-400 mb-5">Déclenche un Bull Run (Volatilité à la hausse x2.5) sur le marché sélectionné ({MARKETS_CONFIG[activeMarketId].name}).</p>
@@ -1808,13 +2037,13 @@
                                 await setDoc(mRef, { flashEvent: { type: 'bull_run', endTime: Date.now() + 60000, active: true } }, { merge: true });
                                 addNotification("Bull Run mondial déclenché sur " + MARKETS_CONFIG[activeMarketId].name, "success");
                              }}
-                             className="w-full bg-amber-600 hover:bg-amber-500 text-white font-bold py-2.5 rounded-lg transition-colors text-sm"
+                             className="w-full bg-amber-600 hover:bg-amber-500 text-white font-bold py-2.5 rounded-lg transition-all active:scale-95 text-sm shadow-md hover:shadow-amber-600/30"
                            >
                               Déclencher Bull Run (60s)
                            </button>
                         </div>
 
-                        <div className="bg-black/40 border border-purple-500/30 p-5 rounded-xl flex flex-col justify-between">
+                        <div className="bg-black/40 border border-purple-500/30 p-5 rounded-xl flex flex-col justify-between transition-all hover:border-purple-500/50 hover:shadow-lg hover:shadow-purple-500/10">
                            <div>
                                <h3 className="font-bold text-purple-400 mb-2">Forcer un Crash</h3>
                                <p className="text-xs text-zinc-400 mb-5">Déclenche un Flash Crash massif (Volatilité à la baisse x2.5) sur le marché sélectionné ({MARKETS_CONFIG[activeMarketId].name}).</p>
@@ -1825,7 +2054,7 @@
                                 await setDoc(mRef, { flashEvent: { type: 'flash_crash', endTime: Date.now() + 60000, active: true } }, { merge: true });
                                 addNotification("Flash Crash mondial déclenché sur " + MARKETS_CONFIG[activeMarketId].name, "success");
                              }}
-                             className="w-full bg-purple-600 hover:bg-purple-500 text-white font-bold py-2.5 rounded-lg transition-colors text-sm"
+                             className="w-full bg-purple-600 hover:bg-purple-500 text-white font-bold py-2.5 rounded-lg transition-all active:scale-95 text-sm shadow-md hover:shadow-purple-600/30"
                            >
                               Déclencher Flash Crash (60s)
                            </button>
@@ -1839,16 +2068,16 @@
             {activeTab === 'upgrades' && (
               <div className="max-w-6xl mx-auto animate-in fade-in slide-in-from-bottom-4 duration-500">
                 {!isLaboUnlocked ? (
-                   <div className="flex flex-col items-center justify-center py-16 sm:py-24 text-center px-4">
+                   <div className="flex flex-col items-center justify-center py-16 sm:py-24 text-center px-4 animate-in zoom-in duration-500">
                        <div className="p-5 bg-indigo-500/10 rounded-full border border-indigo-500/30 mb-6 shadow-[0_0_30px_rgba(99,102,241,0.2)]">
                            <Lock className="w-12 h-12 sm:w-16 sm:h-16 text-indigo-400" />
                        </div>
                        <h2 className="text-2xl sm:text-3xl font-black mb-3">Marché Noir Verrouillé</h2>
                        <p className="text-xs sm:text-sm text-zinc-400 max-w-sm mx-auto leading-relaxed">Le Labo clandestin est strictement réservé aux traders expérimentés. Atteignez <strong className="text-white">15 000$</strong> de valeur totale (Portefeuille Global) pour y accéder.</p>
-                       <div className="mt-8 bg-black/40 border border-white/10 p-4 sm:p-5 rounded-2xl w-full max-w-sm">
+                       <div className="mt-8 bg-black/40 border border-white/10 p-4 sm:p-5 rounded-2xl w-full max-w-sm shadow-inner">
                            <div className="flex justify-between text-xs sm:text-sm mb-2.5 font-bold">
                                <span className="opacity-80">Progression Actuelle</span>
-                               <span className="text-indigo-400">{Math.min(100, (totalValueComputed / 15000) * 100).toFixed(1)}%</span>
+                               <span className="text-indigo-400 transition-all duration-300">{Math.min(100, (totalValueComputed / 15000) * 100).toFixed(1)}%</span>
                            </div>
                            <div className="w-full h-2.5 bg-black/50 rounded-full overflow-hidden border border-white/5">
                                <div className="h-full bg-indigo-500 transition-all duration-1000 shadow-[0_0_10px_rgba(99,102,241,0.8)]" style={{ width: `${Math.min(100, (totalValueComputed / 15000) * 100)}%` }}></div>
@@ -1859,145 +2088,143 @@
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                   <div className="lg:col-span-2 space-y-6">
                      <h2 className="text-xl sm:text-2xl font-black flex items-center gap-2"><Unlock className="w-5 h-5 sm:w-6 sm:h-6 text-indigo-400 shrink-0"/> Marché Noir</h2>
-                     <p className="text-[11px] sm:text-sm opacity-70 border-l-2 border-indigo-500 pl-3">Dépensez vos liquidités pour acheter des outils professionnels. Ces améliorations ne donnent aucun avantage sur les prix, mais transforment votre expérience de manière permanente.</p>
+                     <p className="text-[11px] sm:text-sm opacity-70 border-l-2 border-indigo-500 pl-3 transition-colors">Dépensez vos liquidités pour acheter des outils professionnels. Ces améliorations ne donnent aucun avantage sur les prix, mais transforment votre expérience de manière permanente.</p>
                      
                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         
-                        <div className={`${theme.panel} p-5 rounded-2xl border ${portfolio?.upgrades?.extendedHistory ? 'border-emerald-500/50' : 'border-white/10'} shadow-lg relative overflow-hidden group flex flex-col justify-between`}>
+                        <div className={`${theme.panel} p-5 rounded-2xl border ${portfolio?.upgrades?.extendedHistory ? 'border-emerald-500/50' : 'border-white/10'} shadow-lg relative overflow-hidden group flex flex-col justify-between glass-panel`}>
                            <div>
                                <div className="flex justify-between items-start mb-3">
-                                  <div className={`p-2 rounded-lg ${portfolio?.upgrades?.extendedHistory ? 'bg-emerald-500/20 text-emerald-400' : 'bg-white/5 text-white/50'}`}><History className="w-5 h-5"/></div>
+                                  <div className={`p-2 rounded-lg transition-colors ${portfolio?.upgrades?.extendedHistory ? 'bg-emerald-500/20 text-emerald-400' : 'bg-white/5 text-white/50 group-hover:bg-white/10'}`}><History className="w-5 h-5"/></div>
                                   {!portfolio?.upgrades?.extendedHistory && <span className="font-mono font-bold text-amber-400 text-sm">$10,000</span>}
                                </div>
-                               <h4 className="font-bold text-sm sm:text-base mb-1 flex items-center gap-2">Graphique Étendu {portfolio?.upgrades?.extendedHistory && <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0"/>}</h4>
-                               <p className="text-[10px] sm:text-xs opacity-70 mb-5">Double l'historique visible et débloque le zoom 4x.</p>
+                               <h4 className="font-bold text-sm sm:text-base mb-1 flex items-center gap-2 transition-colors">Graphique Étendu {portfolio?.upgrades?.extendedHistory && <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 animate-in zoom-in"/>}</h4>
+                               <p className="text-[10px] sm:text-xs opacity-70 mb-5 transition-opacity group-hover:opacity-90">Double l'historique visible et débloque le zoom 4x.</p>
                            </div>
                            {portfolio?.upgrades?.extendedHistory ? 
-                              <button className="w-full py-2.5 rounded-xl text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" disabled>Débloqué</button> :
-                              <button onClick={() => handleBuyUpgrade('extendedHistory', 10000)} className="w-full py-2.5 rounded-xl text-xs font-bold bg-white/10 hover:bg-indigo-500 hover:text-white transition-colors">Acheter l'accès</button>
+                              <button className="w-full py-2.5 rounded-xl text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 transition-all" disabled>Débloqué</button> :
+                              <button onClick={() => handleBuyUpgrade('extendedHistory', 10000)} className="w-full py-2.5 rounded-xl text-xs font-bold bg-white/10 hover:bg-indigo-500 hover:text-white transition-all active:scale-95 hover:shadow-lg hover:-translate-y-0.5">Acheter l'accès</button>
                            }
                         </div>
 
-                        <div className={`${theme.panel} p-5 rounded-2xl border ${portfolio?.upgrades?.tradeMarkers ? 'border-emerald-500/50' : 'border-white/10'} shadow-lg relative overflow-hidden group flex flex-col justify-between`}>
+                        <div className={`${theme.panel} p-5 rounded-2xl border ${portfolio?.upgrades?.tradeMarkers ? 'border-emerald-500/50' : 'border-white/10'} shadow-lg relative overflow-hidden group flex flex-col justify-between glass-panel`}>
                            <div>
                                <div className="flex justify-between items-start mb-3">
-                                  <div className={`p-2 rounded-lg ${portfolio?.upgrades?.tradeMarkers ? 'bg-emerald-500/20 text-emerald-400' : 'bg-white/5 text-white/50'}`}><Target className="w-5 h-5"/></div>
+                                  <div className={`p-2 rounded-lg transition-colors ${portfolio?.upgrades?.tradeMarkers ? 'bg-emerald-500/20 text-emerald-400' : 'bg-white/5 text-white/50 group-hover:bg-white/10'}`}><Target className="w-5 h-5"/></div>
                                   {!portfolio?.upgrades?.tradeMarkers && <span className="font-mono font-bold text-amber-400 text-sm">$15,000</span>}
                                </div>
-                               <h4 className="font-bold text-sm sm:text-base mb-1 flex items-center gap-2">Marqueurs de Trade {portfolio?.upgrades?.tradeMarkers && <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0"/>}</h4>
-                               <p className="text-[10px] sm:text-xs opacity-70 mb-5">Affiche vos transactions (points colorés) sur le graphique.</p>
+                               <h4 className="font-bold text-sm sm:text-base mb-1 flex items-center gap-2 transition-colors">Marqueurs de Trade {portfolio?.upgrades?.tradeMarkers && <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 animate-in zoom-in"/>}</h4>
+                               <p className="text-[10px] sm:text-xs opacity-70 mb-5 transition-opacity group-hover:opacity-90">Affiche vos transactions (points colorés) sur le graphique.</p>
                            </div>
                            {portfolio?.upgrades?.tradeMarkers ? 
-                              <button className="w-full py-2.5 rounded-xl text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" disabled>Débloqué</button> :
-                              <button onClick={() => handleBuyUpgrade('tradeMarkers', 15000)} className="w-full py-2.5 rounded-xl text-xs font-bold bg-white/10 hover:bg-indigo-500 hover:text-white transition-colors">Acheter l'outil</button>
+                              <button className="w-full py-2.5 rounded-xl text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 transition-all" disabled>Débloqué</button> :
+                              <button onClick={() => handleBuyUpgrade('tradeMarkers', 15000)} className="w-full py-2.5 rounded-xl text-xs font-bold bg-white/10 hover:bg-indigo-500 hover:text-white transition-all active:scale-95 hover:shadow-lg hover:-translate-y-0.5">Acheter l'outil</button>
                            }
                         </div>
 
-                        {/* NOUVEAUX UPGRADES LABO */}
-                        <div className={`${theme.panel} p-5 rounded-2xl border ${portfolio?.upgrades?.insiderTrading ? 'border-indigo-500/50' : 'border-white/10'} shadow-lg relative overflow-hidden group flex flex-col justify-between`}>
+                        <div className={`${theme.panel} p-5 rounded-2xl border ${portfolio?.upgrades?.insiderTrading ? 'border-indigo-500/50' : 'border-white/10'} shadow-lg relative overflow-hidden group flex flex-col justify-between glass-panel`}>
                            <div>
                                <div className="flex justify-between items-start mb-3">
-                                  <div className={`p-2 rounded-lg ${portfolio?.upgrades?.insiderTrading ? 'bg-indigo-500/20 text-indigo-400' : 'bg-white/5 text-white/50'}`}><Eye className="w-5 h-5"/></div>
+                                  <div className={`p-2 rounded-lg transition-colors ${portfolio?.upgrades?.insiderTrading ? 'bg-indigo-500/20 text-indigo-400' : 'bg-white/5 text-white/50 group-hover:bg-white/10'}`}><Eye className="w-5 h-5"/></div>
                                   {!portfolio?.upgrades?.insiderTrading && <span className="font-mono font-bold text-amber-400 text-sm">$50,000</span>}
                                </div>
-                               <h4 className="font-bold text-sm sm:text-base mb-1 flex items-center gap-2">Délit d'initié {portfolio?.upgrades?.insiderTrading && <CheckCircle2 className="w-4 h-4 text-indigo-400 shrink-0"/>}</h4>
-                               <p className="text-[10px] sm:text-xs opacity-70 mb-5">Réduit de moitié les pénalités punitives lors de vos reventes à perte (passe de x5 à x2).</p>
+                               <h4 className="font-bold text-sm sm:text-base mb-1 flex items-center gap-2 transition-colors">Délit d'initié {portfolio?.upgrades?.insiderTrading && <CheckCircle2 className="w-4 h-4 text-indigo-400 shrink-0 animate-in zoom-in"/>}</h4>
+                               <p className="text-[10px] sm:text-xs opacity-70 mb-5 transition-opacity group-hover:opacity-90">Réduit de moitié les pénalités punitives lors de vos reventes à perte (passe de x5 à x2).</p>
                            </div>
                            {portfolio?.upgrades?.insiderTrading ? 
-                              <button className="w-full py-2.5 rounded-xl text-xs font-bold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20" disabled>Débloqué</button> :
-                              <button onClick={() => handleBuyUpgrade('insiderTrading', 50000)} className="w-full py-2.5 rounded-xl text-xs font-bold bg-white/10 hover:bg-indigo-500 hover:text-white transition-colors">Acheter l'accès</button>
+                              <button className="w-full py-2.5 rounded-xl text-xs font-bold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 transition-all" disabled>Débloqué</button> :
+                              <button onClick={() => handleBuyUpgrade('insiderTrading', 50000)} className="w-full py-2.5 rounded-xl text-xs font-bold bg-white/10 hover:bg-indigo-500 hover:text-white transition-all active:scale-95 hover:shadow-lg hover:-translate-y-0.5">Acheter l'accès</button>
                            }
                         </div>
 
-                        <div className={`${theme.panel} p-5 rounded-2xl border ${portfolio?.upgrades?.whaleWallet ? 'border-amber-500/50' : 'border-white/10'} shadow-lg relative overflow-hidden group flex flex-col justify-between`}>
+                        <div className={`${theme.panel} p-5 rounded-2xl border ${portfolio?.upgrades?.whaleWallet ? 'border-amber-500/50' : 'border-white/10'} shadow-lg relative overflow-hidden group flex flex-col justify-between glass-panel`}>
                            <div>
                                <div className="flex justify-between items-start mb-3">
-                                  <div className={`p-2 rounded-lg ${portfolio?.upgrades?.whaleWallet ? 'bg-amber-500/20 text-amber-400' : 'bg-white/5 text-white/50'}`}><DollarSign className="w-5 h-5"/></div>
+                                  <div className={`p-2 rounded-lg transition-colors ${portfolio?.upgrades?.whaleWallet ? 'bg-amber-500/20 text-amber-400' : 'bg-white/5 text-white/50 group-hover:bg-white/10'}`}><DollarSign className="w-5 h-5"/></div>
                                   {!portfolio?.upgrades?.whaleWallet && <span className="font-mono font-bold text-amber-400 text-sm">$75,000</span>}
                                </div>
-                               <h4 className="font-bold text-sm sm:text-base mb-1 flex items-center gap-2">Coffre Baleine {portfolio?.upgrades?.whaleWallet && <CheckCircle2 className="w-4 h-4 text-amber-400 shrink-0"/>}</h4>
-                               <p className="text-[10px] sm:text-xs opacity-70 mb-5">Augmente la limite de stockage maximale de votre générateur passif de 50$ à 250$.</p>
+                               <h4 className="font-bold text-sm sm:text-base mb-1 flex items-center gap-2 transition-colors">Coffre Baleine {portfolio?.upgrades?.whaleWallet && <CheckCircle2 className="w-4 h-4 text-amber-400 shrink-0 animate-in zoom-in"/>}</h4>
+                               <p className="text-[10px] sm:text-xs opacity-70 mb-5 transition-opacity group-hover:opacity-90">Augmente la limite de stockage maximale de votre générateur passif de 50$ à 250$.</p>
                            </div>
                            {portfolio?.upgrades?.whaleWallet ? 
-                              <button className="w-full py-2.5 rounded-xl text-xs font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20" disabled>Débloqué</button> :
-                              <button onClick={() => handleBuyUpgrade('whaleWallet', 75000)} className="w-full py-2.5 rounded-xl text-xs font-bold bg-white/10 hover:bg-amber-500 hover:text-black transition-colors">Améliorer Coffre</button>
+                              <button className="w-full py-2.5 rounded-xl text-xs font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20 transition-all" disabled>Débloqué</button> :
+                              <button onClick={() => handleBuyUpgrade('whaleWallet', 75000)} className="w-full py-2.5 rounded-xl text-xs font-bold bg-white/10 hover:bg-amber-500 hover:text-black transition-all active:scale-95 hover:shadow-lg hover:-translate-y-0.5">Améliorer Coffre</button>
                            }
                         </div>
-                        {/* FIN NOUVEAUX UPGRADES */}
 
-                        <div className={`${theme.panel} p-5 rounded-2xl border ${portfolio?.upgrades?.diamondHands ? 'border-emerald-500/50' : 'border-white/10'} shadow-lg relative overflow-hidden group flex flex-col justify-between`}>
+                        <div className={`${theme.panel} p-5 rounded-2xl border ${portfolio?.upgrades?.diamondHands ? 'border-emerald-500/50' : 'border-white/10'} shadow-lg relative overflow-hidden group flex flex-col justify-between glass-panel`}>
                            <div>
                                <div className="flex justify-between items-start mb-3">
-                                  <div className={`p-2 rounded-lg ${portfolio?.upgrades?.diamondHands ? 'bg-emerald-500/20 text-emerald-400' : 'bg-white/5 text-white/50'}`}><Briefcase className="w-5 h-5"/></div>
+                                  <div className={`p-2 rounded-lg transition-colors ${portfolio?.upgrades?.diamondHands ? 'bg-emerald-500/20 text-emerald-400' : 'bg-white/5 text-white/50 group-hover:bg-white/10'}`}><Briefcase className="w-5 h-5"/></div>
                                   {!portfolio?.upgrades?.diamondHands && <span className="font-mono font-bold text-amber-400 text-sm">$100,000</span>}
                                </div>
-                               <h4 className="font-bold text-sm sm:text-base mb-1 flex items-center gap-2">Mains de Diamant {portfolio?.upgrades?.diamondHands && <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0"/>}</h4>
-                               <p className="text-[10px] sm:text-xs opacity-70 mb-5">Réduit définitivement vos frais de transaction de 1% à 0.5%.</p>
+                               <h4 className="font-bold text-sm sm:text-base mb-1 flex items-center gap-2 transition-colors">Mains de Diamant {portfolio?.upgrades?.diamondHands && <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 animate-in zoom-in"/>}</h4>
+                               <p className="text-[10px] sm:text-xs opacity-70 mb-5 transition-opacity group-hover:opacity-90">Réduit définitivement vos frais de transaction de 1% à 0.5%.</p>
                            </div>
                            {portfolio?.upgrades?.diamondHands ? 
-                              <button className="w-full py-2.5 rounded-xl text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" disabled>Débloqué</button> :
-                              <button onClick={() => handleBuyUpgrade('diamondHands', 100000)} className="w-full py-2.5 rounded-xl text-xs font-bold bg-white/10 hover:bg-indigo-500 hover:text-white transition-colors">Acheter la licence</button>
+                              <button className="w-full py-2.5 rounded-xl text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 transition-all" disabled>Débloqué</button> :
+                              <button onClick={() => handleBuyUpgrade('diamondHands', 100000)} className="w-full py-2.5 rounded-xl text-xs font-bold bg-white/10 hover:bg-indigo-500 hover:text-white transition-all active:scale-95 hover:shadow-lg hover:-translate-y-0.5">Acheter la licence</button>
                            }
                         </div>
 
-                        <div className={`${theme.panel} p-5 rounded-2xl border ${portfolio?.upgrades?.unlockedThemes?.includes('cyberpunk') ? 'border-fuchsia-500/50' : 'border-white/10'} shadow-lg flex flex-col justify-between`}>
+                        <div className={`${theme.panel} p-5 rounded-2xl border ${portfolio?.upgrades?.unlockedThemes?.includes('cyberpunk') ? 'border-fuchsia-500/50' : 'border-white/10'} shadow-lg flex flex-col justify-between glass-panel group`}>
                            <div>
                                <div className="flex justify-between items-start mb-3">
-                                  <div className="p-2 rounded-lg bg-fuchsia-500/20 text-fuchsia-400"><Palette className="w-5 h-5"/></div>
+                                  <div className="p-2 rounded-lg bg-fuchsia-500/20 text-fuchsia-400 transition-colors group-hover:bg-fuchsia-500/30"><Palette className="w-5 h-5"/></div>
                                   {!portfolio?.upgrades?.unlockedThemes?.includes('cyberpunk') && <span className="font-mono font-bold text-amber-400 text-sm">$25,000</span>}
                                </div>
-                               <h4 className="font-bold text-sm sm:text-base mb-1">Thème "Cyberpunk"</h4>
-                               <p className="text-[10px] sm:text-xs opacity-70 mb-5">Des néons violets et une interface futuriste.</p>
+                               <h4 className="font-bold text-sm sm:text-base mb-1 transition-colors">Thème "Cyberpunk"</h4>
+                               <p className="text-[10px] sm:text-xs opacity-70 mb-5 transition-opacity group-hover:opacity-90">Des néons violets et une interface futuriste.</p>
                            </div>
                            {!portfolio?.upgrades?.unlockedThemes?.includes('cyberpunk') ? 
-                              <button onClick={() => handleBuyUpgrade('cyberpunk', 25000, 'theme')} className="w-full py-2.5 rounded-xl text-xs font-bold bg-white/10 hover:bg-fuchsia-600 hover:text-white transition-colors">Acheter le Thème</button> :
-                              <button onClick={() => handleEquipTheme('cyberpunk')} className={`w-full py-2.5 rounded-xl text-xs font-bold transition-colors ${portfolio?.upgrades?.theme === 'cyberpunk' ? 'bg-fuchsia-500 text-white' : 'bg-white/10 hover:bg-white/20'}`}>{portfolio?.upgrades?.theme === 'cyberpunk' ? 'Équipé' : 'Équiper'}</button>
+                              <button onClick={() => handleBuyUpgrade('cyberpunk', 25000, 'theme')} className="w-full py-2.5 rounded-xl text-xs font-bold bg-white/10 hover:bg-fuchsia-600 hover:text-white transition-all active:scale-95 hover:shadow-lg hover:-translate-y-0.5">Acheter le Thème</button> :
+                              <button onClick={() => handleEquipTheme('cyberpunk')} className={`w-full py-2.5 rounded-xl text-xs font-bold transition-all active:scale-95 ${portfolio?.upgrades?.theme === 'cyberpunk' ? 'bg-fuchsia-500 text-white shadow-lg shadow-fuchsia-500/20' : 'bg-white/10 hover:bg-white/20 hover:-translate-y-0.5'}`}>{portfolio?.upgrades?.theme === 'cyberpunk' ? 'Équipé' : 'Équiper'}</button>
                            }
                         </div>
 
-                        <div className={`${theme.panel} p-5 rounded-2xl border ${portfolio?.upgrades?.unlockedThemes?.includes('matrix') ? 'border-green-500/50' : 'border-white/10'} shadow-lg flex flex-col justify-between`}>
+                        <div className={`${theme.panel} p-5 rounded-2xl border ${portfolio?.upgrades?.unlockedThemes?.includes('matrix') ? 'border-green-500/50' : 'border-white/10'} shadow-lg flex flex-col justify-between glass-panel group`}>
                            <div>
                                <div className="flex justify-between items-start mb-3">
-                                  <div className="p-2 rounded-lg bg-green-500/20 text-green-400"><Palette className="w-5 h-5"/></div>
+                                  <div className="p-2 rounded-lg bg-green-500/20 text-green-400 transition-colors group-hover:bg-green-500/30"><Palette className="w-5 h-5"/></div>
                                   {!portfolio?.upgrades?.unlockedThemes?.includes('matrix') && <span className="font-mono font-bold text-amber-400 text-sm">$40,000</span>}
                                </div>
-                               <h4 className="font-bold text-sm sm:text-base mb-1">Thème "Matrix"</h4>
-                               <p className="text-[10px] sm:text-xs opacity-70 mb-5">Le code brut. Un thème d'un vert impitoyable.</p>
+                               <h4 className="font-bold text-sm sm:text-base mb-1 transition-colors">Thème "Matrix"</h4>
+                               <p className="text-[10px] sm:text-xs opacity-70 mb-5 transition-opacity group-hover:opacity-90">Le code brut. Un thème d'un vert impitoyable.</p>
                            </div>
                            {!portfolio?.upgrades?.unlockedThemes?.includes('matrix') ? 
-                              <button onClick={() => handleBuyUpgrade('matrix', 40000, 'theme')} className="w-full py-2.5 rounded-xl text-xs font-bold bg-white/10 hover:bg-green-600 hover:text-white transition-colors">Acheter le Thème</button> :
-                              <button onClick={() => handleEquipTheme('matrix')} className={`w-full py-2.5 rounded-xl text-xs font-bold transition-colors ${portfolio?.upgrades?.theme === 'matrix' ? 'bg-green-600 text-white' : 'bg-white/10 hover:bg-white/20'}`}>{portfolio?.upgrades?.theme === 'matrix' ? 'Équipé' : 'Équiper'}</button>
+                              <button onClick={() => handleBuyUpgrade('matrix', 40000, 'theme')} className="w-full py-2.5 rounded-xl text-xs font-bold bg-white/10 hover:bg-green-600 hover:text-white transition-all active:scale-95 hover:shadow-lg hover:-translate-y-0.5">Acheter le Thème</button> :
+                              <button onClick={() => handleEquipTheme('matrix')} className={`w-full py-2.5 rounded-xl text-xs font-bold transition-all active:scale-95 ${portfolio?.upgrades?.theme === 'matrix' ? 'bg-green-600 text-white shadow-lg shadow-green-600/20' : 'bg-white/10 hover:bg-white/20 hover:-translate-y-0.5'}`}>{portfolio?.upgrades?.theme === 'matrix' ? 'Équipé' : 'Équiper'}</button>
                            }
                         </div>
 
-                        <div className={`${theme.panel} p-5 rounded-2xl border ${portfolio?.upgrades?.unlockedThemes?.includes('gold') ? 'border-amber-500/50' : 'border-white/10'} shadow-lg flex flex-col justify-between`}>
+                        <div className={`${theme.panel} p-5 rounded-2xl border ${portfolio?.upgrades?.unlockedThemes?.includes('gold') ? 'border-amber-500/50' : 'border-white/10'} shadow-lg flex flex-col justify-between glass-panel group`}>
                            <div>
                                <div className="flex justify-between items-start mb-3">
-                                  <div className="p-2 rounded-lg bg-amber-500/20 text-amber-400"><Palette className="w-5 h-5"/></div>
+                                  <div className="p-2 rounded-lg bg-amber-500/20 text-amber-400 transition-colors group-hover:bg-amber-500/30"><Palette className="w-5 h-5"/></div>
                                   {!portfolio?.upgrades?.unlockedThemes?.includes('gold') && <span className="font-mono font-bold text-amber-400 text-sm">$50,000</span>}
                                </div>
-                               <h4 className="font-bold text-sm sm:text-base mb-1">Thème "Luxe Gold"</h4>
-                               <p className="text-[10px] sm:text-xs opacity-70 mb-5">Pour l'élite de Wall Street. Or massif de rigueur.</p>
+                               <h4 className="font-bold text-sm sm:text-base mb-1 transition-colors">Thème "Luxe Gold"</h4>
+                               <p className="text-[10px] sm:text-xs opacity-70 mb-5 transition-opacity group-hover:opacity-90">Pour l'élite de Wall Street. Or massif de rigueur.</p>
                            </div>
                            {!portfolio?.upgrades?.unlockedThemes?.includes('gold') ? 
-                              <button onClick={() => handleBuyUpgrade('gold', 50000, 'theme')} className="w-full py-2.5 rounded-xl text-xs font-bold bg-white/10 hover:bg-amber-500 hover:text-black transition-colors">Acheter le Thème</button> :
-                              <button onClick={() => handleEquipTheme('gold')} className={`w-full py-2.5 rounded-xl text-xs font-bold transition-colors ${portfolio?.upgrades?.theme === 'gold' ? 'bg-amber-500 text-black' : 'bg-white/10 hover:bg-white/20'}`}>{portfolio?.upgrades?.theme === 'gold' ? 'Équipé' : 'Équiper'}</button>
+                              <button onClick={() => handleBuyUpgrade('gold', 50000, 'theme')} className="w-full py-2.5 rounded-xl text-xs font-bold bg-white/10 hover:bg-amber-500 hover:text-black transition-all active:scale-95 hover:shadow-lg hover:-translate-y-0.5">Acheter le Thème</button> :
+                              <button onClick={() => handleEquipTheme('gold')} className={`w-full py-2.5 rounded-xl text-xs font-bold transition-all active:scale-95 ${portfolio?.upgrades?.theme === 'gold' ? 'bg-amber-500 text-black shadow-lg shadow-amber-500/20' : 'bg-white/10 hover:bg-white/20 hover:-translate-y-0.5'}`}>{portfolio?.upgrades?.theme === 'gold' ? 'Équipé' : 'Équiper'}</button>
                            }
                         </div>
                      </div>
                      
-                     <div className="mt-4 p-4 border border-white/10 rounded-xl bg-black/20">
+                     <div className="mt-4 p-4 border border-white/10 rounded-xl bg-black/20 shadow-inner">
                         <p className="text-[11px] sm:text-xs opacity-60 flex justify-between items-center">
                            <span>Thème par défaut :</span>
-                           <button onClick={() => handleEquipTheme('default')} className={`px-4 py-1.5 rounded-lg font-bold transition-colors ${portfolio?.upgrades?.theme === 'default' ? 'bg-zinc-700 text-white' : 'bg-white/10 hover:bg-white/20'}`}>Équiper</button>
+                           <button onClick={() => handleEquipTheme('default')} className={`px-4 py-1.5 rounded-lg font-bold transition-all active:scale-95 ${portfolio?.upgrades?.theme === 'default' ? 'bg-zinc-700 text-white shadow-md' : 'bg-white/10 hover:bg-white/20 hover:-translate-y-0.5'}`}>Équiper</button>
                         </p>
                      </div>
                   </div>
 
-                  <div className={`${theme.panel} border ${theme.border} rounded-2xl p-5 sm:p-6 shadow-xl h-fit sticky top-24`}>
-                     <div className="flex justify-between items-center mb-6">
+                  <div className={`${theme.panel} border ${theme.border} rounded-2xl p-5 sm:p-6 shadow-xl h-fit sticky top-24 glass-panel`}>
+                     <div className="flex justify-between items-center mb-6 border-b border-white/10 pb-4">
                         <h3 className="text-base sm:text-lg font-bold flex items-center gap-2"><Award className="w-4 h-4 sm:w-5 sm:h-5 text-amber-400 shrink-0"/> Succès</h3>
-                        <span className="text-[10px] sm:text-xs font-mono bg-black/30 px-2 py-1 rounded-lg border border-white/5 shrink-0">{portfolio?.achievements?.length || 0} / {ACHIEVEMENTS_LIST.length}</span>
+                        <span className="text-[10px] sm:text-xs font-mono bg-black/30 px-2 py-1 rounded-lg border border-white/5 shrink-0 shadow-inner">{portfolio?.achievements?.length || 0} / {ACHIEVEMENTS_LIST.length}</span>
                      </div>
                      
                      <div className="space-y-2 sm:space-y-3 h-[70vh] overflow-y-auto pr-2 scrollbar-hide">
@@ -2005,13 +2232,13 @@
                            const isUnlocked = portfolio?.achievements?.includes(ach.id);
                            const Icon = ach.icon;
                            return (
-                              <div key={ach.id} className={`p-3 rounded-xl border flex items-center gap-3 transition-all ${isUnlocked ? 'border-white/10 bg-black/20 opacity-100' : 'border-white/5 bg-transparent opacity-40 grayscale'}`}>
-                                 <div className={`p-2 rounded-full shrink-0 ${isUnlocked ? ach.color : 'bg-white/5 text-white'}`}>
+                              <div key={ach.id} className={`p-3 rounded-xl border flex items-center gap-3 transition-all duration-300 ${isUnlocked ? 'border-white/10 bg-black/20 opacity-100 hover:scale-[1.02] hover:bg-black/40 hover:shadow-md' : 'border-white/5 bg-transparent opacity-40 grayscale'}`}>
+                                 <div className={`p-2 rounded-full shrink-0 transition-transform ${isUnlocked ? ach.color : 'bg-white/5 text-white'}`}>
                                     {isUnlocked ? <Icon className="w-4 h-4"/> : <Lock className="w-4 h-4"/>}
                                  </div>
                                  <div>
-                                    <h5 className="font-bold text-xs sm:text-sm leading-none mb-1">{ach.title}</h5>
-                                    <p className="text-[9px] sm:text-[10px] leading-tight">{ach.desc}</p>
+                                    <h5 className="font-bold text-xs sm:text-sm leading-none mb-1 transition-colors">{ach.title}</h5>
+                                    <p className="text-[9px] sm:text-[10px] leading-tight transition-opacity">{ach.desc}</p>
                                  </div>
                               </div>
                            )
@@ -2028,28 +2255,28 @@
           {/* BARRE DE NAVIGATION INFÉRIEURE OPTIMISÉE POUR PETITS ÉCRANS */}
           <nav className={`fixed bottom-0 left-0 w-full ${theme.bg}/90 backdrop-blur-md border-t ${theme.border} z-50 pb-safe shadow-[0_-10px_40px_rgba(0,0,0,0.5)]`}>
             <div className="max-w-md mx-auto flex justify-between p-1 sm:p-2 gap-1 overflow-x-hidden">
-               <button onClick={() => setActiveTab('trade')} className={`flex-1 flex flex-col items-center justify-center min-w-[50px] max-w-[72px] h-12 rounded-xl transition-all ${activeTab === 'trade' ? `text-${theme.primary}-400 bg-${theme.primary}-500/10` : 'text-zinc-500 hover:text-zinc-300'}`}>
-                  <LineChart className="w-5 h-5 mb-0.5 sm:mb-1 shrink-0" />
-                  <span className="text-[8px] sm:text-[9px] font-bold truncate px-1">Trade</span>
+               <button onClick={() => setActiveTab('trade')} className={`group flex-1 flex flex-col items-center justify-center min-w-[50px] max-w-[72px] h-12 rounded-xl transition-all duration-300 active:scale-95 ${activeTab === 'trade' ? `text-${theme.primary}-400 bg-${theme.primary}-500/10 shadow-inner` : 'text-zinc-500 hover:text-zinc-300 hover:bg-white/5'}`}>
+                  <LineChart className={`w-5 h-5 mb-0.5 sm:mb-1 shrink-0 transition-transform duration-300 ${activeTab === 'trade' ? 'scale-110' : 'group-hover:scale-110'}`} />
+                  <span className="text-[8px] sm:text-[9px] font-bold truncate px-1 transition-all">Trade</span>
                </button>
-               <button onClick={() => setActiveTab('rewards')} className={`flex-1 flex flex-col items-center justify-center min-w-[50px] max-w-[72px] h-12 rounded-xl transition-all relative ${activeTab === 'rewards' ? `text-${theme.primary}-400 bg-${theme.primary}-500/10` : 'text-zinc-500 hover:text-zinc-300'}`}>
-                  <Gift className="w-5 h-5 mb-0.5 sm:mb-1 shrink-0" />
-                  <span className="text-[8px] sm:text-[9px] font-bold truncate px-1">Bonus</span>
+               <button onClick={() => setActiveTab('rewards')} className={`group flex-1 flex flex-col items-center justify-center min-w-[50px] max-w-[72px] h-12 rounded-xl transition-all duration-300 active:scale-95 relative ${activeTab === 'rewards' ? `text-${theme.primary}-400 bg-${theme.primary}-500/10 shadow-inner` : 'text-zinc-500 hover:text-zinc-300 hover:bg-white/5'}`}>
+                  <Gift className={`w-5 h-5 mb-0.5 sm:mb-1 shrink-0 transition-transform duration-300 ${activeTab === 'rewards' ? 'scale-110' : 'group-hover:scale-110'}`} />
+                  <span className="text-[8px] sm:text-[9px] font-bold truncate px-1 transition-all">Bonus</span>
                   {dailyCompleted && !daily.claimedToday && (
                      <span className="absolute top-1.5 right-1 sm:right-3.5 w-2 h-2 bg-amber-500 rounded-full animate-ping"></span>
                   )}
                </button>
-               <button onClick={() => setActiveTab('leaderboard')} className={`flex-1 flex flex-col items-center justify-center min-w-[50px] max-w-[72px] h-12 rounded-xl transition-all ${activeTab === 'leaderboard' ? `text-${theme.primary}-400 bg-${theme.primary}-500/10` : 'text-zinc-500 hover:text-zinc-300'}`}>
-                  <Trophy className="w-5 h-5 mb-0.5 sm:mb-1 shrink-0" />
-                  <span className="text-[8px] sm:text-[9px] font-bold truncate px-1">Top 50</span>
+               <button onClick={() => setActiveTab('leaderboard')} className={`group flex-1 flex flex-col items-center justify-center min-w-[50px] max-w-[72px] h-12 rounded-xl transition-all duration-300 active:scale-95 ${activeTab === 'leaderboard' ? `text-${theme.primary}-400 bg-${theme.primary}-500/10 shadow-inner` : 'text-zinc-500 hover:text-zinc-300 hover:bg-white/5'}`}>
+                  <Trophy className={`w-5 h-5 mb-0.5 sm:mb-1 shrink-0 transition-transform duration-300 ${activeTab === 'leaderboard' ? 'scale-110' : 'group-hover:scale-110'}`} />
+                  <span className="text-[8px] sm:text-[9px] font-bold truncate px-1 transition-all">Top 50</span>
                </button>
-               <button onClick={() => setActiveTab('profile')} className={`flex-1 flex flex-col items-center justify-center min-w-[50px] max-w-[72px] h-12 rounded-xl transition-all ${activeTab === 'profile' ? `text-${theme.primary}-400 bg-${theme.primary}-500/10` : 'text-zinc-500 hover:text-zinc-300'}`}>
-                  <User className="w-5 h-5 mb-0.5 sm:mb-1 shrink-0" />
-                  <span className="text-[8px] sm:text-[9px] font-bold truncate px-1">Profil</span>
+               <button onClick={() => setActiveTab('profile')} className={`group flex-1 flex flex-col items-center justify-center min-w-[50px] max-w-[72px] h-12 rounded-xl transition-all duration-300 active:scale-95 ${activeTab === 'profile' ? `text-${theme.primary}-400 bg-${theme.primary}-500/10 shadow-inner` : 'text-zinc-500 hover:text-zinc-300 hover:bg-white/5'}`}>
+                  <User className={`w-5 h-5 mb-0.5 sm:mb-1 shrink-0 transition-transform duration-300 ${activeTab === 'profile' ? 'scale-110' : 'group-hover:scale-110'}`} />
+                  <span className="text-[8px] sm:text-[9px] font-bold truncate px-1 transition-all">Profil</span>
                </button>
-               <button onClick={() => setActiveTab('upgrades')} className={`flex-1 flex flex-col items-center justify-center min-w-[50px] max-w-[72px] h-12 rounded-xl transition-all relative ${activeTab === 'upgrades' ? `text-${theme.primary}-400 bg-${theme.primary}-500/10` : 'text-zinc-500 hover:text-zinc-300'}`}>
-                  {isLaboUnlocked ? <Unlock className="w-5 h-5 mb-0.5 sm:mb-1 shrink-0" /> : <Lock className="w-5 h-5 mb-0.5 sm:mb-1 shrink-0" />}
-                  <span className="text-[8px] sm:text-[9px] font-bold truncate px-1">Labo</span>
+               <button onClick={() => setActiveTab('upgrades')} className={`group flex-1 flex flex-col items-center justify-center min-w-[50px] max-w-[72px] h-12 rounded-xl transition-all duration-300 active:scale-95 relative ${activeTab === 'upgrades' ? `text-${theme.primary}-400 bg-${theme.primary}-500/10 shadow-inner` : 'text-zinc-500 hover:text-zinc-300 hover:bg-white/5'}`}>
+                  {isLaboUnlocked ? <Unlock className={`w-5 h-5 mb-0.5 sm:mb-1 shrink-0 transition-transform duration-300 ${activeTab === 'upgrades' ? 'scale-110' : 'group-hover:scale-110'}`} /> : <Lock className={`w-5 h-5 mb-0.5 sm:mb-1 shrink-0 transition-transform duration-300 ${activeTab === 'upgrades' ? 'scale-110' : 'group-hover:scale-110'}`} />}
+                  <span className="text-[8px] sm:text-[9px] font-bold truncate px-1 transition-all">Labo</span>
                   {isLaboUnlocked && portfolio?.balance > 10000 && !portfolio?.upgrades?.extendedHistory && <span className="absolute top-1 right-1 sm:right-3 w-2 h-2 bg-rose-500 rounded-full animate-pulse"></span>}
                </button>
             </div>
@@ -2076,7 +2303,7 @@
                           }, { merge: true });
                           playSound('claim');
                       }}
-                      className="w-full bg-rose-600 hover:bg-rose-500 text-white font-bold py-3.5 rounded-xl transition-transform active:scale-95 shadow-lg shadow-rose-600/20"
+                      className="w-full bg-rose-600 hover:bg-rose-500 text-white font-bold py-3.5 rounded-xl transition-all active:scale-95 hover:-translate-y-0.5 shadow-lg shadow-rose-600/20"
                    >
                       Se déclarer en faillite (Repartir avec 10 000$)
                    </button>
@@ -2088,16 +2315,16 @@
           {selectedPlayer && (
              <div className="fixed inset-0 z-[200] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in zoom-in duration-300">
                 <div className={`${theme.panel} border ${theme.border} p-5 sm:p-8 rounded-3xl max-w-2xl w-full relative shadow-[0_0_50px_rgba(0,0,0,0.8)] max-h-[90vh] flex flex-col overflow-hidden`}>
-                   <button onClick={() => setSelectedPlayer(null)} className="absolute top-4 right-4 p-2 bg-white/5 hover:bg-rose-500/20 hover:text-rose-400 rounded-full transition-colors z-10 shrink-0">
+                   <button onClick={() => setSelectedPlayer(null)} className="absolute top-4 right-4 p-2 bg-white/5 hover:bg-rose-500/20 hover:text-rose-400 rounded-full transition-colors z-10 shrink-0 active:scale-95">
                        <X className="w-5 h-5"/>
                    </button>
                    <div className="flex items-center gap-4 mb-6 border-b border-white/10 pb-4 shrink-0">
-                       <div className="w-14 h-14 rounded-full bg-amber-500/20 border border-amber-500/50 flex items-center justify-center text-amber-400 shrink-0">
+                       <div className="w-14 h-14 rounded-full bg-amber-500/20 border border-amber-500/50 flex items-center justify-center text-amber-400 shrink-0 transition-transform duration-500 hover:scale-105">
                           <User className="w-7 h-7" />
                        </div>
                        <div className="overflow-hidden pr-8">
-                          <h2 className="text-xl sm:text-2xl font-black text-white truncate">Profil de {selectedPlayer.pseudo}</h2>
-                          <p className="text-xs sm:text-sm text-amber-400/80 font-mono font-bold truncate">Valeur globale : {selectedPlayer.totalValue.toLocaleString('fr-FR', { style: 'currency', currency: 'USD' })}</p>
+                          <h2 className="text-xl sm:text-2xl font-black text-white truncate">{selectedPlayer.pseudo}</h2>
+                          <p className="text-xs sm:text-sm text-amber-400/80 font-mono font-bold truncate transition-colors">Valeur globale : {selectedPlayer.totalValue.toLocaleString('fr-FR', { style: 'currency', currency: 'USD' })}</p>
                        </div>
                    </div>
                    <div className="overflow-y-auto scrollbar-hide pb-2 flex-1">
@@ -2118,7 +2345,7 @@
                                       setSelectedPlayer(null);
                                   }
                                }}
-                               className={`w-full font-bold py-2.5 rounded-xl transition-colors text-sm flex justify-center items-center gap-2 ${confirmResetPlayerId === selectedPlayer.id ? 'bg-rose-600 text-white animate-pulse' : 'bg-rose-600/20 hover:bg-rose-600/40 text-rose-400 border border-rose-500/50'}`}
+                               className={`w-full font-bold py-2.5 rounded-xl transition-all active:scale-95 text-sm flex justify-center items-center gap-2 ${confirmResetPlayerId === selectedPlayer.id ? 'bg-rose-600 text-white animate-pulse' : 'bg-rose-600/20 hover:bg-rose-600/40 text-rose-400 border border-rose-500/50 hover:-translate-y-0.5'}`}
                             >
                                <Shield className="w-4 h-4"/> 
                                {confirmResetPlayerId === selectedPlayer.id ? 'Confirmer (Recliquer)' : 'Admin : Remettre son argent à 10 000$'}
