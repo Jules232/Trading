@@ -68,7 +68,7 @@
     import { 
       TrendingUp, TrendingDown, Activity, AlertCircle, DollarSign, Briefcase, Zap, Globe, 
       Users, Gift, LineChart, Trophy, Info, X, Flame, Coins, Dices, HelpCircle,
-      Palette, Maximize2, History, Target, Lock, Unlock, Award, CheckCircle2, ChevronRight, Sparkles, Eye, Bell, User, Shield, Bot
+      Palette, Maximize2, History, Target, Lock, Unlock, Award, CheckCircle2, ChevronRight, Sparkles, Eye, Bell, User, Shield, Bot, Volume2, VolumeX
     } from 'lucide-react';
 
     // --- INITIALISATION FIREBASE ---
@@ -347,6 +347,7 @@
       const [zoomLevel, setZoomLevel] = useState(1);
       const [tradeQuantity, setTradeQuantity] = useState(1); // x1 ou x10
       const [aeternaPrice, setAeternaPrice] = useState(getAeternaPrice());
+      const [isMusicPlaying, setIsMusicPlaying] = useState(false);
       
       // Liste des IDs d'événements majeurs masqués localement pour moins d'intrusion
       const [dismissedEvents, setDismissedEvents] = useState([]);
@@ -368,6 +369,86 @@
       
       const globalSettingsRefState = useRef(globalSettings);
       useEffect(() => { globalSettingsRefState.current = globalSettings; }, [globalSettings]);
+
+      // --- GESTION DE LA MUSIQUE D'AMBIANCE ---
+      useEffect(() => {
+        if (!isMusicPlaying) return;
+        
+        let step = 0;
+        let activeNodes = []; // Pour garder en mémoire les notes en cours
+        
+        const chords = [
+            [261.63, 329.63, 392.00], // C
+            [220.00, 261.63, 329.63], // Am
+            [174.61, 220.00, 261.63], // F
+            [196.00, 246.94, 293.66]  // G
+        ];
+
+        const playNextChord = () => {
+            try {
+                if (!globalAudioCtx) globalAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                const ctx = globalAudioCtx;
+                if (ctx.state === 'suspended') ctx.resume();
+                
+                const freqs = chords[step];
+                const now = ctx.currentTime;
+                
+                freqs.forEach(f => {
+                    const osc = ctx.createOscillator();
+                    const gain = ctx.createGain();
+                    const filter = ctx.createBiquadFilter();
+                    
+                    filter.type = 'lowpass';
+                    filter.frequency.value = 600; // Son feutré / ambient
+
+                    osc.connect(filter);
+                    filter.connect(gain);
+                    gain.connect(ctx.destination);
+                    
+                    osc.type = 'triangle';
+                    osc.frequency.value = f / 2; // Octave inférieure
+                    
+                    // CORRECTION DU BUG FATAL ICI :
+                    // setValueAtTime sécurise l'enveloppe sonore sans faire planter le navigateur
+                    gain.gain.setValueAtTime(0.001, now);
+                    gain.gain.exponentialRampToValueAtTime(0.02, now + 2); 
+                    gain.gain.setValueAtTime(0.02, now + 4); 
+                    gain.gain.exponentialRampToValueAtTime(0.001, now + 6); 
+                    
+                    osc.start(now);
+                    osc.stop(now + 6);
+
+                    activeNodes.push({ osc, gain });
+                });
+                
+                // Nettoyage de la mémoire pour éviter les fuites audio
+                activeNodes = activeNodes.filter(n => n.osc.context.currentTime < now + 6);
+                step = (step + 1) % chords.length;
+
+            } catch (error) {
+                console.warn("L'API Audio a été bloquée par le navigateur.", error);
+            }
+        };
+
+        playNextChord();
+        const interval = setInterval(playNextChord, 6000);
+
+        return () => {
+            clearInterval(interval);
+            // Arrêt en douceur (Fade out) lorsqu'on coupe la musique
+            try {
+                if (globalAudioCtx) {
+                    const now = globalAudioCtx.currentTime;
+                    activeNodes.forEach(n => {
+                        n.gain.gain.cancelScheduledValues(now);
+                        n.gain.gain.setValueAtTime(n.gain.gain.value, now);
+                        n.gain.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
+                        n.osc.stop(now + 0.5);
+                    });
+                }
+            } catch(e) {}
+        };
+      }, [isMusicPlaying]);
 
       // Met à jour le prix long terme
       useEffect(() => {
@@ -515,12 +596,13 @@
             const data = docSnap.data();
             if (!data.assets) data.assets = { 'm_slow': { shares: 0, averageBuyPrice: 0 }, 'm_medium': { shares: data.shares || 0, averageBuyPrice: data.averageBuyPrice || 0 }, 'm_fast': { shares: 0, averageBuyPrice: 0 } };
             if (!data.upgrades) {
-                data.upgrades = { theme: 'default', unlockedThemes: ['default'], extendedHistory: false, tradeMarkers: false, diamondHands: false, unlockedMarkets: ['m_medium'], laboUnlocked: false, insiderTrading: false, whaleWallet: false };
+                data.upgrades = { theme: 'default', unlockedThemes: ['default'], extendedHistory: false, tradeMarkers: false, diamondHands: false, unlockedMarkets: ['m_medium'], laboUnlocked: false, insiderTrading: false, whaleWallet: false, disabledFeatures: [] };
             } else {
                 if (!data.upgrades.unlockedMarkets) data.upgrades.unlockedMarkets = ['m_medium'];
                 if (data.upgrades.laboUnlocked === undefined) data.upgrades.laboUnlocked = false;
                 if (data.upgrades.insiderTrading === undefined) data.upgrades.insiderTrading = false;
                 if (data.upgrades.whaleWallet === undefined) data.upgrades.whaleWallet = false;
+                if (!data.upgrades.disabledFeatures) data.upgrades.disabledFeatures = [];
             }
             if (!data.transactions) data.transactions = { 'm_slow': [], 'm_medium': [], 'm_fast': [] };
             if (!data.achievements) data.achievements = [];
@@ -654,14 +736,14 @@
       useEffect(() => {
         if (!user || isLoading) return;
         const interval = setInterval(() => {
-          const maxLimit = portfolio?.upgrades?.whaleWallet ? 250 : MAX_STAKING_RESERVOIR;
+          const maxLimit = (portfolio?.upgrades?.whaleWallet && !portfolio?.upgrades?.disabledFeatures?.includes('whaleWallet')) ? 250 : MAX_STAKING_RESERVOIR;
           setStakingEarnings(prev => {
             if (prev >= maxLimit) return maxLimit;
             return parseFloat((prev + STAKING_RATE).toFixed(2));
           });
         }, 1000);
         return () => clearInterval(interval);
-      }, [user, isLoading, portfolio?.upgrades?.whaleWallet]);
+      }, [user, isLoading, portfolio?.upgrades?.whaleWallet, portfolio?.upgrades?.disabledFeatures]);
 
       // MOTEUR DE SIMULATION AVEC ALERTES FLASH EN TEMPS RÉEL (BULL RUN & FLASH CRASH)
       useEffect(() => {
@@ -905,10 +987,10 @@
                      // Sauvegarde de l'état du bot
                      await setDoc(botRef, botData, { merge: true });
                      
-                     // Push direct dans le Leaderboard avec l'emoji robot
+                     // Push direct dans le Leaderboard (sans emoji pour rester furtif)
                      const lbRef = doc(db, 'artifacts', appId, 'public', 'data', 'leaderboard', bot.id);
                      await setDoc(lbRef, {
-                         pseudo: "🤖 " + bot.pseudo,
+                         pseudo: bot.pseudo,
                          totalValue: botTotalValue,
                          lastUpdated: now,
                          stats: botData.stats
@@ -1216,6 +1298,28 @@
         await setDoc(portfolioRef, { balance: newBalance, upgrades: newUpgrades }, { merge: true });
       };
 
+      const handleToggleFeature = async (featureId) => {
+        if (!portfolio || !user) return;
+        playSound('tick');
+        const portfolioRef = doc(db, 'artifacts', appId, 'users', user.uid, 'portfolio', 'state');
+        
+        const currentDisabled = portfolio.upgrades?.disabledFeatures || [];
+        let newDisabled;
+        if (currentDisabled.includes(featureId)) {
+            newDisabled = currentDisabled.filter(id => id !== featureId);
+        } else {
+            newDisabled = [...currentDisabled, featureId];
+        }
+        
+        const newUpgrades = { ...portfolio.upgrades, disabledFeatures: newDisabled };
+        setPortfolio(prev => ({ ...prev, upgrades: newUpgrades }));
+        await setDoc(portfolioRef, { upgrades: newUpgrades }, { merge: true });
+      };
+
+      const isFeatureActive = (featureId) => {
+        return portfolio?.upgrades?.[featureId] && !portfolio?.upgrades?.disabledFeatures?.includes(featureId);
+      };
+
       const handleEquipTheme = async (themeId) => {
         if (!portfolio || !portfolio.upgrades.unlockedThemes.includes(themeId)) return;
         playSound('tick');
@@ -1299,7 +1403,7 @@
       const currentThemeId = portfolio?.upgrades?.theme || 'default';
       const theme = THEMES[currentThemeId] || THEMES['default'];
 
-      const dataToChart = portfolio?.upgrades?.extendedHistory ? activeMarket.history : activeMarket.history.slice(-25);
+      const dataToChart = isFeatureActive('extendedHistory') ? activeMarket.history : activeMarket.history.slice(-25);
       const aeternaAssets = portfolio.assets?.['m_longterm'] || { shares: 0, averageBuyPrice: 0 };
 
       // VARIABLES DÉFIS QUOTIDIENS
@@ -1309,7 +1413,7 @@
       // VARIABLES VERROUILLAGE & TICK RATE POUR LE GRAPHIQUE
       const isMarketUnlocked = portfolio?.upgrades?.unlockedMarkets?.includes(activeMarketId);
       const isLaboUnlocked = portfolio?.upgrades?.laboUnlocked;
-      const currentMaxStaking = portfolio?.upgrades?.whaleWallet ? 250 : MAX_STAKING_RESERVOIR;
+      const currentMaxStaking = isFeatureActive('whaleWallet') ? 250 : MAX_STAKING_RESERVOIR;
       const targetTickDelay = MARKETS_CONFIG[activeMarketId].tickRate === 0 ? 400 : (MARKETS_CONFIG[activeMarketId].tickRate === 1 ? 900 : 1900);
 
       // VARIABLES RECOMPENSES HEBDOMADAIRES (TOP 3)
@@ -1381,7 +1485,7 @@
           {/* MODALE ADMIN */}
           {showAdminPrompt && (
              <div className="fixed inset-0 z-[200] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in zoom-in duration-300">
-                <div className={`${theme.panel} border ${theme.border} p-6 rounded-3xl max-w-sm w-full relative shadow-[0_0_50px_rgba(0,0,0,0.8)]`}>
+                <div className={`${theme.panel} border ${theme.border} p-6 rounded-3xl max-w-sm w-full relative shadow-[0_0_50px_rgba(0,0,0,0.8)] max-h-[90vh] overflow-y-auto`}>
                    <button onClick={() => { setShowAdminPrompt(false); setAdminPwd(''); }} className="absolute top-4 right-4 p-2 bg-white/5 hover:bg-rose-500/20 hover:text-rose-400 rounded-full transition-colors active:scale-95">
                        <X className="w-4 h-4"/>
                    </button>
@@ -1431,8 +1535,8 @@
           )}
 
           <header className={`border-b ${theme.border} ${theme.bg}/80 backdrop-blur-md sticky top-0 z-40 transition-colors`}>
-            <div className="max-w-6xl mx-auto py-4 flex items-center justify-between">
-              <div className="flex items-center gap-2 cursor-pointer group" onClick={() => {
+            <div className="max-w-6xl mx-auto py-4 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2 cursor-pointer group min-w-0 shrink" onClick={() => {
                   if (!isAdminMode) {
                       setShowAdminPrompt(true);
                   } else {
@@ -1440,10 +1544,13 @@
                   }
               }}>
                 <Globe className={`w-5 h-5 text-${theme.primary}-400 shrink-0 group-hover:animate-spin transition-all duration-500`} />
-                <h1 className="text-base sm:text-lg font-bold tracking-tight truncate transition-colors group-hover:text-white">TRADEX<span className={`text-${theme.primary}-500`}>.LIVE</span></h1>
+                <h1 className="text-base sm:text-lg font-bold tracking-tight truncate transition-colors group-hover:text-white min-w-0">TRADEX<span className={`text-${theme.primary}-500`}>.LIVE</span></h1>
               </div>
               <div className="flex gap-2 sm:gap-6 text-sm items-center shrink-0">
-                <div className={`flex items-center gap-1.5 bg-black/40 px-3 py-1.5 rounded-full border ${theme.border} shadow-inner`}>
+                <button onClick={() => setIsMusicPlaying(!isMusicPlaying)} title="Activer/Désactiver la musique" className={`p-1.5 sm:p-2 rounded-full border transition-all duration-300 active:scale-95 shrink-0 ${isMusicPlaying ? `bg-${theme.primary}-500/20 text-${theme.primary}-400 border-${theme.primary}-500/30 shadow-[0_0_10px_rgba(16,185,129,0.2)]` : 'bg-black/40 text-zinc-500 border-white/10 hover:text-zinc-300 hover:bg-white/5'}`}>
+                  {isMusicPlaying ? <Volume2 className="w-3.5 h-3.5 sm:w-4 sm:h-4"/> : <VolumeX className="w-3.5 h-3.5 sm:w-4 sm:h-4"/>}
+                </button>
+                <div className={`flex items-center gap-1.5 bg-black/40 px-3 py-1.5 rounded-full border ${theme.border} shadow-inner shrink-0`}>
                   <span className="relative flex h-2 w-2 shrink-0">
                     <span className={`animate-ping absolute inline-flex h-full w-full rounded-full bg-${theme.primary}-400 opacity-75`}></span>
                     <span className={`relative inline-flex rounded-full h-2 w-2 bg-${theme.primary}-500`}></span>
@@ -1563,7 +1670,7 @@
                         </div>
                       </div>
 
-                      {portfolio?.upgrades?.extendedHistory && (
+                      {isFeatureActive('extendedHistory') && (
                          <div className={`flex items-center gap-3 p-2 rounded-lg border ${theme.border} bg-black/20 max-w-xs animate-in fade-in`}>
                             <Maximize2 className="w-4 h-4 opacity-50 shrink-0" />
                             <span className="text-[10px] uppercase font-bold opacity-60 shrink-0">Zoom Graphique</span>
@@ -1580,7 +1687,7 @@
                           averageBuyPrice={activeAssets.averageBuyPrice}
                           sharesCount={activeAssets.shares}
                           zoomLevel={zoomLevel}
-                          showMarkers={portfolio?.upgrades?.tradeMarkers}
+                          showMarkers={isFeatureActive('tradeMarkers')}
                           transactions={portfolio?.transactions?.[activeMarketId]}
                           themeColor={theme.primary}
                           tickDelay={targetTickDelay}
@@ -1635,7 +1742,7 @@
                               </div>
                               {activeMarket.price < activeAssets.averageBuyPrice && (
                                 <div className="p-2 bg-rose-500/10 border border-rose-500/20 rounded-lg text-rose-400 text-[10px] flex items-center gap-1.5 leading-tight animate-in fade-in">
-                                  <AlertCircle className="w-4 h-4 shrink-0 animate-pulse" /> Attention ! Vente à perte (Perte x{portfolio.upgrades?.insiderTrading ? '2' : '5'}).
+                                  <AlertCircle className="w-4 h-4 shrink-0 animate-pulse" /> Attention ! Vente à perte (Perte x{isFeatureActive('insiderTrading') ? '2' : '5'}).
                                 </div>
                               )}
                             </>
@@ -1643,11 +1750,11 @@
                         </div>
 
                         <div className="grid grid-cols-2 gap-3 sm:gap-4">
-                          <button onClick={() => handleTrade('BUY')} disabled={portfolio.balance < (activeMarket.price * tradeQuantity * (1 + (portfolio.upgrades?.diamondHands ? 0.005 : 0.01)))} className="group bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-xl py-3 font-bold flex flex-col items-center disabled:opacity-30 transition-all active:scale-95 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-emerald-500/20 text-xs sm:text-sm">
-                            ACHETER x{tradeQuantity} <span className="text-[9px] font-normal opacity-70 mt-1">Frais: {portfolio.upgrades?.diamondHands ? '0.5%' : '1%'}</span>
+                          <button onClick={() => handleTrade('BUY')} disabled={portfolio.balance < (activeMarket.price * tradeQuantity * (1 + (isFeatureActive('diamondHands') ? 0.005 : 0.01)))} className="group bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-xl py-3 font-bold flex flex-col items-center disabled:opacity-30 transition-all active:scale-95 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-emerald-500/20 text-xs sm:text-sm">
+                            ACHETER x{tradeQuantity} <span className="text-[9px] font-normal opacity-70 mt-1">Frais: {isFeatureActive('diamondHands') ? '0.5%' : '1%'}</span>
                           </button>
                           <button onClick={() => handleTrade('SELL')} disabled={activeAssets.shares < tradeQuantity} className="group bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded-xl py-3 font-bold flex flex-col items-center disabled:opacity-30 transition-all active:scale-95 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-rose-500/20 text-xs sm:text-sm">
-                            VENDRE x{tradeQuantity} <span className="text-[9px] font-normal opacity-70 mt-1">Frais: {portfolio.upgrades?.diamondHands ? '0.5%' : '1%'}</span>
+                            VENDRE x{tradeQuantity} <span className="text-[9px] font-normal opacity-70 mt-1">Frais: {isFeatureActive('diamondHands') ? '0.5%' : '1%'}</span>
                           </button>
                         </div>
                       </div>
@@ -2102,7 +2209,7 @@
                                <p className="text-[10px] sm:text-xs opacity-70 mb-5 transition-opacity group-hover:opacity-90">Double l'historique visible et débloque le zoom 4x.</p>
                            </div>
                            {portfolio?.upgrades?.extendedHistory ? 
-                              <button className="w-full py-2.5 rounded-xl text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 transition-all" disabled>Débloqué</button> :
+                              <button onClick={() => handleToggleFeature('extendedHistory')} className={`w-full py-2.5 rounded-xl text-xs font-bold transition-all active:scale-95 hover:-translate-y-0.5 ${isFeatureActive('extendedHistory') ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20' : 'bg-zinc-500/10 text-zinc-400 border border-zinc-500/20 hover:bg-zinc-500/20'}`}>{isFeatureActive('extendedHistory') ? 'Désactiver' : 'Activer'}</button> :
                               <button onClick={() => handleBuyUpgrade('extendedHistory', 10000)} className="w-full py-2.5 rounded-xl text-xs font-bold bg-white/10 hover:bg-indigo-500 hover:text-white transition-all active:scale-95 hover:shadow-lg hover:-translate-y-0.5">Acheter l'accès</button>
                            }
                         </div>
@@ -2117,7 +2224,7 @@
                                <p className="text-[10px] sm:text-xs opacity-70 mb-5 transition-opacity group-hover:opacity-90">Affiche vos transactions (points colorés) sur le graphique.</p>
                            </div>
                            {portfolio?.upgrades?.tradeMarkers ? 
-                              <button className="w-full py-2.5 rounded-xl text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 transition-all" disabled>Débloqué</button> :
+                              <button onClick={() => handleToggleFeature('tradeMarkers')} className={`w-full py-2.5 rounded-xl text-xs font-bold transition-all active:scale-95 hover:-translate-y-0.5 ${isFeatureActive('tradeMarkers') ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20' : 'bg-zinc-500/10 text-zinc-400 border border-zinc-500/20 hover:bg-zinc-500/20'}`}>{isFeatureActive('tradeMarkers') ? 'Désactiver' : 'Activer'}</button> :
                               <button onClick={() => handleBuyUpgrade('tradeMarkers', 15000)} className="w-full py-2.5 rounded-xl text-xs font-bold bg-white/10 hover:bg-indigo-500 hover:text-white transition-all active:scale-95 hover:shadow-lg hover:-translate-y-0.5">Acheter l'outil</button>
                            }
                         </div>
@@ -2132,7 +2239,7 @@
                                <p className="text-[10px] sm:text-xs opacity-70 mb-5 transition-opacity group-hover:opacity-90">Réduit de moitié les pénalités punitives lors de vos reventes à perte (passe de x5 à x2).</p>
                            </div>
                            {portfolio?.upgrades?.insiderTrading ? 
-                              <button className="w-full py-2.5 rounded-xl text-xs font-bold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 transition-all" disabled>Débloqué</button> :
+                              <button onClick={() => handleToggleFeature('insiderTrading')} className={`w-full py-2.5 rounded-xl text-xs font-bold transition-all active:scale-95 hover:-translate-y-0.5 ${isFeatureActive('insiderTrading') ? 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 hover:bg-indigo-500/20' : 'bg-zinc-500/10 text-zinc-400 border border-zinc-500/20 hover:bg-zinc-500/20'}`}>{isFeatureActive('insiderTrading') ? 'Désactiver' : 'Activer'}</button> :
                               <button onClick={() => handleBuyUpgrade('insiderTrading', 50000)} className="w-full py-2.5 rounded-xl text-xs font-bold bg-white/10 hover:bg-indigo-500 hover:text-white transition-all active:scale-95 hover:shadow-lg hover:-translate-y-0.5">Acheter l'accès</button>
                            }
                         </div>
@@ -2147,7 +2254,7 @@
                                <p className="text-[10px] sm:text-xs opacity-70 mb-5 transition-opacity group-hover:opacity-90">Augmente la limite de stockage maximale de votre générateur passif de 50$ à 250$.</p>
                            </div>
                            {portfolio?.upgrades?.whaleWallet ? 
-                              <button className="w-full py-2.5 rounded-xl text-xs font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20 transition-all" disabled>Débloqué</button> :
+                              <button onClick={() => handleToggleFeature('whaleWallet')} className={`w-full py-2.5 rounded-xl text-xs font-bold transition-all active:scale-95 hover:-translate-y-0.5 ${isFeatureActive('whaleWallet') ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20 hover:bg-amber-500/20' : 'bg-zinc-500/10 text-zinc-400 border border-zinc-500/20 hover:bg-zinc-500/20'}`}>{isFeatureActive('whaleWallet') ? 'Désactiver' : 'Activer'}</button> :
                               <button onClick={() => handleBuyUpgrade('whaleWallet', 75000)} className="w-full py-2.5 rounded-xl text-xs font-bold bg-white/10 hover:bg-amber-500 hover:text-black transition-all active:scale-95 hover:shadow-lg hover:-translate-y-0.5">Améliorer Coffre</button>
                            }
                         </div>
@@ -2162,7 +2269,7 @@
                                <p className="text-[10px] sm:text-xs opacity-70 mb-5 transition-opacity group-hover:opacity-90">Réduit définitivement vos frais de transaction de 1% à 0.5%.</p>
                            </div>
                            {portfolio?.upgrades?.diamondHands ? 
-                              <button className="w-full py-2.5 rounded-xl text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 transition-all" disabled>Débloqué</button> :
+                              <button onClick={() => handleToggleFeature('diamondHands')} className={`w-full py-2.5 rounded-xl text-xs font-bold transition-all active:scale-95 hover:-translate-y-0.5 ${isFeatureActive('diamondHands') ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20' : 'bg-zinc-500/10 text-zinc-400 border border-zinc-500/20 hover:bg-zinc-500/20'}`}>{isFeatureActive('diamondHands') ? 'Désactiver' : 'Activer'}</button> :
                               <button onClick={() => handleBuyUpgrade('diamondHands', 100000)} className="w-full py-2.5 rounded-xl text-xs font-bold bg-white/10 hover:bg-indigo-500 hover:text-white transition-all active:scale-95 hover:shadow-lg hover:-translate-y-0.5">Acheter la licence</button>
                            }
                         </div>
