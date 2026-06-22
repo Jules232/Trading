@@ -116,6 +116,7 @@
       { id: 'black_market_boss', title: 'Parrain du Marché Noir', desc: 'Achetez la Carte Noire VIP.', icon: ShieldAlert, color: 'text-red-400 bg-red-500/10' },
       { id: 'eth_whale', title: 'Pionnier du Web3', desc: 'Débloquez le marché Ethereum.', icon: Hexagon, color: 'text-indigo-400 bg-indigo-500/10' },
       { id: 'singularity_reached', title: 'Maître du Temps', desc: 'Achetez la Singularité.', icon: Infinity, color: 'text-cyan-400 bg-cyan-500/10' },
+      { id: 'ancient_veteran', title: 'Ancien des Anciens', desc: 'Achetez l\'amélioration Anciens Joueurs et atteignez 1 000 000 000$ de capital total.', icon: Award, color: 'text-violet-300 bg-violet-500/10' },
       { id: 'champion_or', title: 'Médaille d\'Or', desc: 'A terminé Top 1 mondial de la semaine.', icon: Trophy, color: 'text-yellow-400 bg-yellow-500/10' },
       { id: 'champion_argent', title: 'Médaille d\'Argent', desc: 'A terminé Top 2 mondial de la semaine.', icon: Trophy, color: 'text-gray-300 bg-gray-400/10' },
       { id: 'champion_bronze', title: 'Médaille de Bronze', desc: 'A terminé Top 3 mondial de la semaine.', icon: Trophy, color: 'text-amber-600 bg-amber-700/10' }
@@ -365,6 +366,8 @@
       const [confirmReset, setConfirmReset] = useState(false);
       const [confirmDeleteProfile, setConfirmDeleteProfile] = useState(false);
       const [confirmResetPlayerId, setConfirmResetPlayerId] = useState(null);
+      const [confirmHardReset, setConfirmHardReset] = useState(false);
+      const [showEndScreen, setShowEndScreen] = useState(false);
 
       const [stakingEarnings, setStakingEarnings] = useState(0);
 
@@ -382,6 +385,7 @@
       
       // Liste des IDs d'événements majeurs masqués localement pour moins d'intrusion
       const [dismissedEvents, setDismissedEvents] = useState([]);
+      const [isQuotaExceeded, setIsQuotaExceeded] = useState(false);
 
       // SYSTÈME DE NOTIFICATIONS TOAST
       const [notifications, setNotifications] = useState([]);
@@ -397,6 +401,13 @@
 
       const isFeatureActive = (featureId) => {
         return portfolio?.upgrades?.[featureId] && !portfolio?.upgrades?.disabledFeatures?.includes(featureId);
+      };
+
+      const handleFirebaseSuccess = () => setIsQuotaExceeded(false);
+      const handleFirebaseError = (error) => {
+          if (error && (error.code === 'resource-exhausted' || (error.message && error.message.includes('Quota exceeded')))) {
+              setIsQuotaExceeded(true);
+          }
       };
 
       const marketsRefState = useRef(markets);
@@ -509,12 +520,13 @@
           if(!user) return;
           const settingsRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'global');
           const unsub = onSnapshot(settingsRef, (docSnap) => {
+              handleFirebaseSuccess();
               if (docSnap.exists()) {
                   setGlobalSettings(docSnap.data());
               } else {
-                  setDoc(settingsRef, { botsActive: true });
+                  setDoc(settingsRef, { botsActive: true }).catch(handleFirebaseError);
               }
-          });
+          }, handleFirebaseError);
           return () => unsub();
       }, [user]);
 
@@ -546,6 +558,7 @@
 
         const onlineUsersRef = collection(db, 'artifacts', appId, 'public', 'data', 'online_users');
         const unsubPresence = onSnapshot(onlineUsersRef, (snapshot) => {
+          handleFirebaseSuccess();
           const now = Date.now();
           let count = 0;
           let onlineMap = {};
@@ -557,7 +570,7 @@
           });
           setOnlineCount(Math.max(1, count));
           setOnlinePlayersMap(onlineMap);
-        });
+        }, handleFirebaseError);
 
         return () => { clearInterval(presenceInterval); unsubPresence(); };
       }, [user]);
@@ -586,8 +599,9 @@
         for (const mId of MARKET_IDS) {
           const mRef = doc(db, 'artifacts', appId, 'public', 'data', 'markets', mId);
           const unsub = onSnapshot(mRef, (docSnap) => {
+            handleFirebaseSuccess();
             if (docSnap.exists()) setMarkets(prev => ({ ...prev, [mId]: docSnap.data() }));
-          });
+          }, handleFirebaseError);
           unsubscribers.push(unsub);
         }
 
@@ -604,9 +618,10 @@
               lastWeeklyClaim: 0,
               assets: defaultAssets,
               lastRewardClaim: 0, pseudo: "", streak: 1,
-              upgrades: { theme: 'default', unlockedThemes: ['default'], extendedHistory: false, tradeMarkers: false, diamondHands: false, unlockedMarkets: ['m_medium'], laboUnlocked: false, insiderTrading: false, whaleWallet: false, leviathan: false, blackCard: false, quantumComputer: false, singularity: false, dysonSphere: false, disabledFeatures: [] },
+              upgrades: { theme: 'default', unlockedThemes: ['default'], extendedHistory: false, tradeMarkers: false, diamondHands: false, unlockedMarkets: ['m_medium'], laboUnlocked: false, insiderTrading: false, whaleWallet: false, leviathan: false, blackCard: false, quantumComputer: false, singularity: false, ancientPlayers: false, dysonSphere: false, disabledFeatures: [] },
               transactions: {},
               achievements: [],
+              gameEndingSeen: false,
               stats: { totalProfit: 0, totalTrades: 0, winningTrades: 0, bestTrade: 0, worstTrade: 0, highestPortfolio: 10000, playTimeSeconds: 0 },
               dailyQuests: {
                 lastReset: Date.now(),
@@ -624,6 +639,7 @@
                 updates.v2_reset = true;
             }
             if (data.lastWeeklyClaim === undefined) updates.lastWeeklyClaim = 0;
+            if (data.gameEndingSeen === undefined) updates.gameEndingSeen = false;
             if (!data.stats) updates.stats = { totalProfit: 0, totalTrades: 0, winningTrades: 0, bestTrade: 0, worstTrade: 0, highestPortfolio: 10000, playTimeSeconds: 0 };
             
             // Assurer que tous les nouveaux marchés existent dans assets
@@ -635,13 +651,14 @@
             if (needsAssetUpdate) updates.assets = updatedAssets;
 
             if (Object.keys(updates).length > 0) {
-                await setDoc(portfolioRef, updates, { merge: true });
+                await setDoc(portfolioRef, updates, { merge: true }).catch(handleFirebaseError);
             }
           }
         };
         initPortfolio();
 
         const unsubPortfolio = onSnapshot(portfolioRef, (docSnap) => {
+          handleFirebaseSuccess();
           if (docSnap.exists()) {
             const data = docSnap.data();
             
@@ -652,7 +669,7 @@
             if (!data.assets['m_longterm']) data.assets['m_longterm'] = { shares: 0, averageBuyPrice: 0 };
 
             if (!data.upgrades) {
-                data.upgrades = { theme: 'default', unlockedThemes: ['default'], extendedHistory: false, tradeMarkers: false, diamondHands: false, unlockedMarkets: ['m_medium'], laboUnlocked: false, insiderTrading: false, whaleWallet: false, leviathan: false, blackCard: false, quantumComputer: false, singularity: false, dysonSphere: false, disabledFeatures: [] };
+                data.upgrades = { theme: 'default', unlockedThemes: ['default'], extendedHistory: false, tradeMarkers: false, diamondHands: false, unlockedMarkets: ['m_medium'], laboUnlocked: false, insiderTrading: false, whaleWallet: false, leviathan: false, blackCard: false, quantumComputer: false, singularity: false, ancientPlayers: false, dysonSphere: false, disabledFeatures: [] };
             } else {
                 if (!data.upgrades.unlockedMarkets) data.upgrades.unlockedMarkets = ['m_medium'];
                 if (data.upgrades.laboUnlocked === undefined) data.upgrades.laboUnlocked = false;
@@ -662,6 +679,7 @@
                 if (data.upgrades.blackCard === undefined) data.upgrades.blackCard = false;
                 if (data.upgrades.quantumComputer === undefined) data.upgrades.quantumComputer = false;
                 if (data.upgrades.singularity === undefined) data.upgrades.singularity = false;
+                if (data.upgrades.ancientPlayers === undefined) data.upgrades.ancientPlayers = false;
                 if (data.upgrades.dysonSphere === undefined) data.upgrades.dysonSphere = false;
                 if (!data.upgrades.disabledFeatures) data.upgrades.disabledFeatures = [];
             }
@@ -671,6 +689,7 @@
             });
 
             if (!data.achievements) data.achievements = [];
+            if (data.gameEndingSeen === undefined) data.gameEndingSeen = false;
             if (!data.stats) data.stats = { totalProfit: 0, totalTrades: 0, winningTrades: 0, bestTrade: 0, worstTrade: 0, highestPortfolio: 10000, playTimeSeconds: 0 };
             if (!data.dailyQuests) {
               data.dailyQuests = {
@@ -687,7 +706,7 @@
             setPortfolio(data);
             setIsLoading(false);
           }
-        });
+        }, handleFirebaseError);
 
         return () => { unsubscribers.forEach(unsub => unsub()); unsubPortfolio(); };
       }, [user]);
@@ -732,6 +751,17 @@
 
       useEffect(() => { totalValueRef.current = totalValueComputed; }, [totalValueComputed]);
 
+      // SYNCHRONISATION IMMÉDIATE DU CLASSEMENT
+      // Corrige le bug où le classement ne se mettait pas à jour lors des nouveaux trades
+      useEffect(() => {
+        if (!user || !portfolio || !portfolio.pseudo) return;
+        const lbRef = doc(db, 'artifacts', appId, 'public', 'data', 'leaderboard', user.uid);
+        const timeoutId = setTimeout(() => {
+            setDoc(lbRef, { totalValue: totalValueComputed, lastUpdated: Date.now() }, { merge: true }).catch(() => {});
+        }, 1500);
+        return () => clearTimeout(timeoutId);
+      }, [totalValueComputed, user, portfolio?.pseudo]);
+
       useEffect(() => {
         if (portfolio && !portfolio.upgrades?.laboUnlocked && totalValueComputed >= 15000) {
             const portfolioRef = doc(db, 'artifacts', appId, 'users', user.uid, 'portfolio', 'state');
@@ -741,6 +771,15 @@
             playSound('win');
             addNotification('Félicitations ! Le Marché Noir (Labo) est maintenant débloqué.', 'success');
         }
+      }, [totalValueComputed, portfolio, user]);
+
+      useEffect(() => {
+        if (!portfolio || !user || portfolio.gameEndingSeen || totalValueComputed < 1000000000) return;
+        const portfolioRef = doc(db, 'artifacts', appId, 'users', user.uid, 'portfolio', 'state');
+        setShowEndScreen(true);
+        setPortfolio(p => ({ ...p, gameEndingSeen: true }));
+        setDoc(portfolioRef, { gameEndingSeen: true }, { merge: true });
+        playSound('win');
       }, [totalValueComputed, portfolio, user]);
 
       useEffect(() => {
@@ -772,11 +811,12 @@
         if (!user) return;
         const lbCol = collection(db, 'artifacts', appId, 'public', 'data', 'leaderboard');
         const unsubLeaderboard = onSnapshot(lbCol, (snapshot) => {
+          handleFirebaseSuccess();
           let data = [];
           snapshot.forEach(d => data.push({ id: d.id, ...d.data() }));
           data.sort((a, b) => b.totalValue - a.totalValue);
           setLeaderboard(data.slice(0, 50));
-        });
+        }, handleFirebaseError);
         return () => unsubLeaderboard();
       }, [user]);
 
@@ -795,8 +835,8 @@
       useEffect(() => {
         if (!user || isLoading) return;
         const interval = setInterval(() => {
-          const maxLimit = isFeatureActive('dysonSphere') ? 100000 : isFeatureActive('leviathan') ? 1000 : isFeatureActive('whaleWallet') ? 250 : MAX_STAKING_RESERVOIR;
-          const currentRate = isFeatureActive('singularity') ? 50.00 : isFeatureActive('quantumComputer') ? 0.50 : STAKING_RATE;
+          const maxLimit = isFeatureActive('ancientPlayers') ? 1000000 : isFeatureActive('dysonSphere') ? 100000 : isFeatureActive('leviathan') ? 1000 : isFeatureActive('whaleWallet') ? 250 : MAX_STAKING_RESERVOIR;
+          const currentRate = isFeatureActive('ancientPlayers') ? 500.00 : isFeatureActive('singularity') ? 50.00 : isFeatureActive('quantumComputer') ? 0.50 : STAKING_RATE;
 
           setStakingEarnings(prev => {
             if (prev >= maxLimit) return maxLimit;
@@ -804,7 +844,7 @@
           });
         }, 1000);
         return () => clearInterval(interval);
-      }, [user, isLoading, portfolio?.upgrades?.whaleWallet, portfolio?.upgrades?.leviathan, portfolio?.upgrades?.quantumComputer, portfolio?.upgrades?.singularity, portfolio?.upgrades?.dysonSphere, portfolio?.upgrades?.disabledFeatures]);
+      }, [user, isLoading, portfolio?.upgrades?.whaleWallet, portfolio?.upgrades?.leviathan, portfolio?.upgrades?.quantumComputer, portfolio?.upgrades?.singularity, portfolio?.upgrades?.ancientPlayers, portfolio?.upgrades?.dysonSphere, portfolio?.upgrades?.disabledFeatures]);
 
       // MOTEUR DE SIMULATION AVEC ALERTES FLASH EN TEMPS RÉEL
       useEffect(() => {
@@ -1070,6 +1110,7 @@
         if (portfolio.upgrades?.blackCard) unlock('black_market_boss');
         if (portfolio.upgrades?.unlockedMarkets?.includes('m_eth')) unlock('eth_whale');
         if (portfolio.upgrades?.singularity) unlock('singularity_reached');
+        if (portfolio.upgrades?.ancientPlayers && totalValueComputed >= 1000000000) unlock('ancient_veteran');
 
         if (unlockedSomething) {
           const portfolioRef = doc(db, 'artifacts', appId, 'users', user.uid, 'portfolio', 'state');
@@ -1453,7 +1494,8 @@
       const isLaboUnlocked = portfolio?.upgrades?.laboUnlocked;
       
       // Variables pour la limite max de staking (inclut la nouvelle amélioration Dyson)
-      const currentMaxStaking = isFeatureActive('dysonSphere') ? 100000 : isFeatureActive('leviathan') ? 1000 : isFeatureActive('whaleWallet') ? 250 : MAX_STAKING_RESERVOIR;
+      const currentMaxStaking = isFeatureActive('ancientPlayers') ? 1000000 : isFeatureActive('dysonSphere') ? 100000 : isFeatureActive('leviathan') ? 1000 : isFeatureActive('whaleWallet') ? 250 : MAX_STAKING_RESERVOIR;
+      const currentStakingRateText = isFeatureActive('ancientPlayers') ? '500.00$' : isFeatureActive('singularity') ? '50.00$' : isFeatureActive('quantumComputer') ? '0.50$' : '0.05$';
       const targetTickDelay = MARKETS_CONFIG[activeMarketId].tickRate === 0 ? 400 : (MARKETS_CONFIG[activeMarketId].tickRate === 1 ? 900 : 1900);
 
       // VARIABLES RECOMPENSES HEBDOMADAIRES (TOP 3)
@@ -1503,7 +1545,8 @@
                     assets: defaultAssets,
                     transactions: defaultTxs,
                     stats: { totalProfit: 0, totalTrades: 0, winningTrades: 0, bestTrade: 0, worstTrade: 0, highestPortfolio: 10000, playTimeSeconds: 0 },
-                    achievements: []
+                    achievements: [],
+                    gameEndingSeen: false
                 }, { merge: true });
                 setConfirmDeleteProfile(false);
                 setActiveTab('trade');
@@ -1528,6 +1571,47 @@
               </div>
             ))}
           </div>
+
+          {/* ÉCRAN DE FIN NON BLOQUANT */}
+          {showEndScreen && (
+             <div className="fixed inset-0 z-[210] bg-black/85 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in zoom-in duration-500">
+                <div className={`${theme.panel} border border-emerald-400/40 p-6 sm:p-8 rounded-3xl max-w-lg w-full relative shadow-[0_0_70px_rgba(16,185,129,0.35)] overflow-hidden`}>
+                   <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-emerald-400 via-amber-300 to-violet-400"></div>
+                   <button onClick={() => setShowEndScreen(false)} className="absolute top-4 right-4 p-2 bg-white/5 hover:bg-emerald-500/20 hover:text-emerald-300 rounded-full transition-colors active:scale-95">
+                       <X className="w-4 h-4"/>
+                   </button>
+                   <div className="flex items-center gap-3 mb-5 pr-10">
+                      <div className="p-3 rounded-2xl bg-emerald-500/15 text-emerald-300 border border-emerald-400/20">
+                         <Crown className="w-7 h-7"/>
+                      </div>
+                      <div>
+                         <p className="text-xs uppercase tracking-widest text-emerald-300 font-black">Objectif atteint</p>
+                         <h2 className="text-2xl sm:text-3xl font-black text-white leading-tight">1 milliard d'euros</h2>
+                      </div>
+                   </div>
+                   <p className="text-sm sm:text-base text-zinc-200 leading-relaxed mb-6">
+                      Vous avez terminé le jeu principal. Votre empire tient debout tout seul, mais la partie continue : les classements, le labo, les succès rares et les vieux défis restent ouverts.
+                   </p>
+                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
+                      <div className="bg-black/25 border border-white/10 rounded-2xl p-3">
+                         <p className="text-[10px] uppercase text-zinc-500 font-bold">Capital</p>
+                         <p className="font-mono text-emerald-300 font-black truncate">{totalValueComputed.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' })}</p>
+                      </div>
+                      <div className="bg-black/25 border border-white/10 rounded-2xl p-3">
+                         <p className="text-[10px] uppercase text-zinc-500 font-bold">Succès</p>
+                         <p className="font-mono text-amber-300 font-black">{portfolio?.achievements?.length || 0} / {ACHIEVEMENTS_LIST.length}</p>
+                      </div>
+                      <div className="bg-black/25 border border-white/10 rounded-2xl p-3">
+                         <p className="text-[10px] uppercase text-zinc-500 font-bold">Suite</p>
+                         <p className="font-mono text-violet-300 font-black">Libre</p>
+                      </div>
+                   </div>
+                   <button onClick={() => setShowEndScreen(false)} className="w-full py-3 rounded-2xl text-sm font-black bg-emerald-500 hover:bg-emerald-400 text-black transition-all active:scale-95 shadow-lg shadow-emerald-500/20">
+                      Continuer à jouer
+                   </button>
+                </div>
+             </div>
+          )}
 
           {/* MODALE ADMIN */}
           {showAdminPrompt && (
@@ -1582,6 +1666,12 @@
           )}
 
           <header className={`border-b ${theme.border} ${theme.bg}/80 backdrop-blur-md sticky top-0 z-40 transition-colors`}>
+            {isQuotaExceeded && (
+              <div className="bg-rose-500/10 border-b border-rose-500/30 text-rose-400 text-[10px] sm:text-xs font-bold py-2 px-4 text-center flex items-center justify-center gap-2 shadow-inner w-full">
+                 <AlertCircle className="w-4 h-4 sm:w-5 sm:h-5 shrink-0 animate-pulse" />
+                 <span className="leading-tight break-words">⚠️ Attention : les crédits Firebase sont épuisés. Vous êtes actuellement en mode hors ligne. Certaines fonctionnalités en ligne peuvent être temporairement indisponibles.</span>
+              </div>
+            )}
             <div className="max-w-6xl mx-auto py-4 flex items-center justify-between gap-3 min-w-0">
               <div className="flex items-center gap-2 cursor-pointer group min-w-0 shrink" onClick={() => {
                   if (!isAdminMode) {
@@ -1697,14 +1787,14 @@
 
                   <div className={`grid grid-cols-1 lg:grid-cols-3 gap-6 sm:gap-8 ${!isMarketUnlocked ? 'opacity-20 pointer-events-none blur-[2px] select-none transition-all duration-500' : 'transition-all duration-500'}`}>
                     <div className="lg:col-span-2 space-y-4 sm:space-y-6 min-w-0">
-                      <div className="flex flex-wrap justify-between items-end gap-3 glass-panel p-2 -mx-2 rounded-2xl border border-transparent">
-                        <div className="overflow-hidden pr-2 flex-1 min-w-0">
-                          <p className="text-[10px] uppercase tracking-wider font-bold opacity-60 truncate flex items-center gap-1.5">
+                      <div className="flex flex-col sm:flex-row sm:justify-between items-start sm:items-end gap-4 glass-panel p-2 -mx-2 rounded-2xl border border-transparent">
+                        <div className="pr-2 w-full sm:flex-1">
+                          <p className="text-[10px] uppercase tracking-wider font-bold opacity-60 truncate flex items-center gap-1.5 mb-1.5 sm:mb-0">
                              <ActiveMarketIcon className={`w-3.5 h-3.5 ${MARKETS_CONFIG[activeMarketId].iconColor || ''}`} /> Marché : {MARKETS_CONFIG[activeMarketId].name}
                           </p>
-                          <div className="flex items-baseline gap-2 min-w-0">
+                          <div className="flex items-baseline gap-2 flex-wrap sm:flex-nowrap w-full">
                             {/* Ajustement taille pour éviter que $1,000,000,000 ne casse l'écran */}
-                            <h2 className="text-3xl sm:text-4xl md:text-5xl font-bold font-mono tracking-tighter truncate transition-all duration-300">
+                            <h2 className="text-3xl sm:text-4xl md:text-5xl font-bold font-mono tracking-tighter transition-all duration-300 break-words max-w-full leading-tight">
                               ${activeMarket.price.toFixed(2)}
                             </h2>
                             <span className={`flex items-center font-mono text-sm sm:text-lg shrink-0 transition-colors duration-300 ${isPositiveTrend ? 'text-emerald-400' : 'text-rose-400'}`}>
@@ -1713,11 +1803,11 @@
                             </span>
                           </div>
                         </div>
-                        <div className={`flex flex-col items-center justify-center px-4 py-2 rounded-xl border ${theme.panel} shadow-sm shrink-0 transition-all duration-300 ${
+                        <div className={`w-full sm:w-auto flex flex-row sm:flex-col items-center justify-between sm:justify-center px-4 py-3 sm:py-2 rounded-xl border ${theme.panel} shadow-sm shrink-0 transition-all duration-300 ${
                            sentiment > 0.5 ? 'border-emerald-500/30 text-emerald-400' : sentiment < -0.5 ? 'border-rose-500/30 text-rose-400' : `${theme.border} opacity-70`
                         }`}>
-                           <p className="text-[9px] uppercase font-bold tracking-widest mb-0.5">Activité Joueurs</p>
-                           <div className="flex items-center gap-1.5 font-semibold text-xs sm:text-sm">
+                           <p className="text-[10px] sm:text-[9px] uppercase font-bold tracking-widest sm:mb-0.5">Activité Joueurs</p>
+                           <div className="flex items-center gap-1.5 font-semibold text-sm">
                               <SentimentIcon className="w-4 h-4 transition-transform duration-300" /> <span>{sentimentText}</span>
                            </div>
                         </div>
@@ -1773,9 +1863,9 @@
                         </div>
                         
                         <div className="space-y-3 mb-5">
-                          <div className="flex justify-between items-center bg-black/30 p-3 rounded-lg border border-white/5 shadow-sm transition-all hover:border-white/10 min-w-0">
-                            <span className="text-[11px] sm:text-xs opacity-70 shrink-0">Liquidités</span>
-                            <span className="font-mono text-base sm:text-lg font-bold truncate pl-2 transition-all" title={portfolio.balance.toLocaleString('fr-FR', { style: 'currency', currency: 'USD' })}>{portfolio.balance.toLocaleString('fr-FR', { style: 'currency', currency: 'USD' })}</span>
+                          <div className="flex justify-between items-start bg-black/30 p-3 rounded-lg border border-white/5 shadow-sm transition-all hover:border-white/10 min-w-0">
+                            <span className="text-[11px] sm:text-xs opacity-70 shrink-0 mt-0.5">Liquidités</span>
+                            <span className="font-mono text-base sm:text-lg font-bold break-words pl-2 transition-all text-right" title={portfolio.balance.toLocaleString('fr-FR', { style: 'currency', currency: 'USD' })}>{portfolio.balance.toLocaleString('fr-FR', { style: 'currency', currency: 'USD' })}</span>
                           </div>
                           <div className="flex justify-between items-center bg-black/30 p-3 rounded-lg border border-white/5 shadow-sm transition-all hover:border-white/10 min-w-0">
                             <span className="text-[11px] sm:text-xs opacity-70 truncate pr-2">Actions ({MARKETS_CONFIG[activeMarketId].name})</span>
@@ -1829,7 +1919,7 @@
                       </div>
                       <div className="text-left md:text-right shrink-0 min-w-0">
                          <span className="text-[10px] sm:text-xs uppercase font-bold text-amber-500/60 block truncate">Valeur Actuelle (1 part)</span>
-                         <span className="text-xl sm:text-2xl md:text-3xl font-mono font-black text-amber-400 drop-shadow-[0_0_5px_rgba(245,158,11,0.5)] transition-all truncate block" title={"$"+aeternaPrice.toFixed(2)}>${aeternaPrice.toFixed(2)}</span>
+                         <span className="text-xl sm:text-2xl md:text-3xl font-mono font-black text-amber-400 drop-shadow-[0_0_5px_rgba(245,158,11,0.5)] transition-all break-words block" title={"$"+aeternaPrice.toFixed(2)}>${aeternaPrice.toFixed(2)}</span>
                       </div>
                    </div>
 
@@ -1912,7 +2002,7 @@
                     <div className={`absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-${theme.primary}-500 to-teal-500`}></div>
                     <div>
                       <h3 className={`text-lg font-bold flex gap-2 text-${theme.primary}-400 mb-4 truncate`}><Coins className="animate-bounce shrink-0"/> Générateur Passif</h3>
-                      <p className="text-[11px] sm:text-xs opacity-70 mb-6">Générez {isFeatureActive('singularity') ? '50.00$' : isFeatureActive('quantumComputer') ? '0.50$' : '0.05$'} par seconde pendant que l'app est ouverte (Max ${currentMaxStaking}).</p>
+                      <p className="text-[11px] sm:text-xs opacity-70 mb-6">Générez {currentStakingRateText} par seconde pendant que l'app est ouverte (Max ${currentMaxStaking}).</p>
                       <div className="bg-black/30 p-3 sm:p-4 rounded-xl border border-white/5 flex items-center justify-between gap-4 mb-6 shadow-inner transition-colors hover:border-white/10">
                         <div className="w-full bg-black/50 rounded-full h-4 overflow-hidden relative border border-white/10">
                           <div className={`bg-gradient-to-r from-${theme.primary}-500 to-teal-400 h-full transition-all duration-1000`} style={{ width: `${(stakingEarnings / currentMaxStaking) * 100}%` }}/>
@@ -2153,8 +2243,8 @@
 
                         <div className="bg-black/40 border border-rose-500/30 p-5 rounded-xl flex flex-col justify-between transition-all hover:border-rose-500/50 hover:shadow-lg hover:shadow-rose-500/10 min-w-0">
                            <div>
-                               <h3 className="font-bold text-white mb-2 truncate">Réinitialisation Globale</h3>
-                               <p className="text-[10px] sm:text-xs text-zinc-400 mb-5 break-words">Remet le solde de l'ensemble des joueurs présents dans le classement à 10 000$.</p>
+                               <h3 className="font-bold text-white mb-2 truncate">Réinitialisation Liquidités</h3>
+                               <p className="text-[10px] sm:text-xs text-zinc-400 mb-5 break-words">Remet le solde liquide de l'ensemble des joueurs à 10 000$ (Soft Reset).</p>
                            </div>
                            <button 
                              onClick={() => {
@@ -2166,18 +2256,73 @@
                                       if(player.id) {
                                          const pRef = doc(db, 'artifacts', appId, 'users', player.id, 'portfolio', 'state');
                                          await setDoc(pRef, { balance: 10000 }, { merge: true });
+                                         
+                                         const lbRef = doc(db, 'artifacts', appId, 'public', 'data', 'leaderboard', player.id);
+                                         await setDoc(lbRef, { totalValue: 10000 }, { merge: true });
                                       }
                                    });
-                                   addNotification("Tous les comptes du classement ont été réinitialisés.", "success");
+                                   addNotification("Tous les comptes ont été réinitialisés à 10 000$.", "success");
                                    setConfirmReset(false);
                                 }
                              }}
                              className={`w-full text-white font-bold py-2.5 rounded-lg transition-all active:scale-95 text-xs sm:text-sm px-2 truncate ${confirmReset ? 'bg-red-600 hover:bg-red-500 animate-pulse' : 'bg-rose-600 hover:bg-rose-500 shadow-md hover:shadow-rose-600/30'}`}
                            >
-                              {confirmReset ? 'Confirmer (Recliquer)' : 'Tout réinitialiser (10k)'}
+                              {confirmReset ? 'Confirmer (Recliquer)' : 'Soft Reset (10k)'}
                            </button>
                         </div>
                         
+                        {/* NOUVEAU BOUTON : HARD RESET (WIPE TOTAL) */}
+                        <div className="bg-black/40 border border-red-500/30 p-5 rounded-xl flex flex-col justify-between transition-all hover:border-red-500/50 hover:shadow-lg hover:shadow-red-500/10 min-w-0">
+                           <div>
+                               <h3 className="font-bold text-red-400 mb-2 truncate flex items-center gap-2"><AlertCircle className="w-4 h-4 shrink-0"/> Hard Reset (Wipe)</h3>
+                               <p className="text-[10px] sm:text-xs text-zinc-400 mb-5 break-words">Efface absolument TOUT : portefeuilles, actions, améliorations du labo, succès et thèmes. Remet tout le classement à 0 (10k$).</p>
+                           </div>
+                           <button 
+                             onClick={() => {
+                                if(!confirmHardReset) {
+                                   setConfirmHardReset(true);
+                                   setTimeout(() => setConfirmHardReset(false), 4000);
+                                } else {
+                                   leaderboard.forEach(async (player) => {
+                                      if(player.id) {
+                                         let defaultAssets = {};
+                                         MARKET_IDS.forEach(m => { defaultAssets[m] = { shares: 0, averageBuyPrice: 0 }; });
+                                         defaultAssets['m_longterm'] = { shares: 0, averageBuyPrice: 0 };
+
+                                         let defaultTxs = {};
+                                         MARKET_IDS.forEach(m => { defaultTxs[m] = []; });
+                                         
+                                         const defaultState = {
+                                             balance: 10000.00,
+                                             v2_reset: true,
+                                             lastWeeklyClaim: 0,
+                                             assets: defaultAssets,
+                                             lastRewardClaim: 0,
+                                             upgrades: { theme: 'default', unlockedThemes: ['default'], extendedHistory: false, tradeMarkers: false, diamondHands: false, unlockedMarkets: ['m_medium'], laboUnlocked: false, insiderTrading: false, whaleWallet: false, leviathan: false, blackCard: false, quantumComputer: false, singularity: false, ancientPlayers: false, dysonSphere: false, disabledFeatures: [] },
+                                             transactions: defaultTxs,
+                                             achievements: [],
+                                             gameEndingSeen: false,
+                                             stats: { totalProfit: 0, totalTrades: 0, winningTrades: 0, bestTrade: 0, worstTrade: 0, highestPortfolio: 10000, playTimeSeconds: 0 },
+                                             dailyQuests: { lastReset: Date.now(), tradesCount: 0, rouletteCount: 0, aeternaBought: 0, claimedToday: false }
+                                         };
+
+                                         const pRef = doc(db, 'artifacts', appId, 'users', player.id, 'portfolio', 'state');
+                                         await setDoc(pRef, defaultState, { merge: true });
+
+                                         const lbRef = doc(db, 'artifacts', appId, 'public', 'data', 'leaderboard', player.id);
+                                         await setDoc(lbRef, { totalValue: 10000, stats: defaultState.stats }, { merge: true });
+                                      }
+                                   });
+                                   addNotification("Hard Reset mondial effectué avec succès.", "success");
+                                   setConfirmHardReset(false);
+                                }
+                             }}
+                             className={`w-full font-bold py-2.5 rounded-lg transition-all active:scale-95 text-xs sm:text-sm px-2 truncate flex justify-center items-center gap-2 ${confirmHardReset ? 'bg-red-600 text-white animate-pulse shadow-[0_0_15px_rgba(220,38,38,0.5)]' : 'bg-red-600/20 hover:bg-red-600/40 text-red-400 border border-red-500/50 hover:-translate-y-0.5'}`}
+                           >
+                              {confirmHardReset ? 'Wipe Complet ! (Confirmer)' : 'Wipe Complet (Hard Reset)'}
+                           </button>
+                        </div>
+
                         <div className="bg-black/40 border border-emerald-500/30 p-5 rounded-xl flex flex-col justify-between transition-all hover:border-emerald-500/50 hover:shadow-lg hover:shadow-emerald-500/10 min-w-0">
                            <div>
                                <h3 className="font-bold text-emerald-400 mb-2 truncate">S'enrichir (Self)</h3>
@@ -2397,6 +2542,22 @@
                            {portfolio?.upgrades?.singularity ? 
                               <button onClick={() => handleToggleFeature('singularity')} className={`w-full py-2.5 rounded-xl text-xs font-bold transition-all active:scale-95 hover:-translate-y-0.5 mt-auto ${isFeatureActive('singularity') ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 hover:bg-cyan-500/20' : 'bg-zinc-500/10 text-zinc-400 border border-zinc-500/20 hover:bg-zinc-500/20'}`}>{isFeatureActive('singularity') ? 'Désactiver' : 'Activer'}</button> :
                               <button onClick={() => handleBuyUpgrade('singularity', 250000000)} className="w-full py-2.5 rounded-xl text-xs font-bold bg-white/10 hover:bg-cyan-500 hover:text-black transition-all active:scale-95 hover:shadow-lg hover:-translate-y-0.5 mt-auto truncate px-2">Fusionner</button>
+                           }
+                        </div>
+
+                        {/* AMÉLIORATION ULTIME : ANCIENS JOUEURS */}
+                        <div className={`h-full ${theme.panel} p-5 rounded-2xl border ${portfolio?.upgrades?.ancientPlayers ? 'border-violet-500/50' : 'border-white/10'} shadow-lg relative overflow-hidden group flex flex-col justify-between glass-panel min-w-0`}>
+                           <div className="mb-4">
+                               <div className="flex justify-between items-start mb-3">
+                                  <div className={`p-2 rounded-lg transition-colors ${portfolio?.upgrades?.ancientPlayers ? 'bg-violet-500/20 text-violet-300' : 'bg-white/5 text-white/50 group-hover:bg-white/10'}`}><Award className="w-4 h-4 sm:w-5 sm:h-5"/></div>
+                                  {!portfolio?.upgrades?.ancientPlayers && <span className="font-mono font-bold text-amber-400 text-xs sm:text-sm" title="$500,000,000">$500,000,000</span>}
+                               </div>
+                               <h4 className="font-bold text-sm sm:text-base mb-1 flex items-center gap-2 transition-colors truncate">Anciens Joueurs {portfolio?.upgrades?.ancientPlayers && <CheckCircle2 className="w-4 h-4 text-violet-300 shrink-0 animate-in zoom-in"/>}</h4>
+                               <p className="text-[10px] sm:text-xs opacity-70 transition-opacity group-hover:opacity-90 break-words">Pour les vétérans extrêmes. Transforme le générateur passif en machine à 500.00$/sec, avec un coffre à 1,000,000$.</p>
+                           </div>
+                           {portfolio?.upgrades?.ancientPlayers ? 
+                              <button onClick={() => handleToggleFeature('ancientPlayers')} className={`w-full py-2.5 rounded-xl text-xs font-bold transition-all active:scale-95 hover:-translate-y-0.5 mt-auto ${isFeatureActive('ancientPlayers') ? 'bg-violet-500/10 text-violet-300 border border-violet-500/20 hover:bg-violet-500/20' : 'bg-zinc-500/10 text-zinc-400 border border-zinc-500/20 hover:bg-zinc-500/20'}`}>{isFeatureActive('ancientPlayers') ? 'Désactiver' : 'Activer'}</button> :
+                              <button onClick={() => handleBuyUpgrade('ancientPlayers', 500000000)} className="w-full py-2.5 rounded-xl text-xs font-bold bg-white/10 hover:bg-violet-500 hover:text-white transition-all active:scale-95 hover:shadow-lg hover:-translate-y-0.5 mt-auto truncate px-2">Transcender</button>
                            }
                         </div>
 
@@ -2649,6 +2810,10 @@
                                   } else {
                                       const pRef = doc(db, 'artifacts', appId, 'users', selectedPlayer.id, 'portfolio', 'state');
                                       await setDoc(pRef, { balance: 10000 }, { merge: true });
+                                      
+                                      const lbRef = doc(db, 'artifacts', appId, 'public', 'data', 'leaderboard', selectedPlayer.id);
+                                      await setDoc(lbRef, { totalValue: 10000 }, { merge: true });
+
                                       addNotification(`Argent de ${selectedPlayer.pseudo} réinitialisé.`, "success");
                                       setConfirmResetPlayerId(null);
                                       setSelectedPlayer(null);
